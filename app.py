@@ -475,20 +475,22 @@ _MAIN_HTML = """\
   </div>
   {% endif %}
 
-  <!-- 기존 파이프라인 -->
+  <!-- 파이프라인 -->
   <div class="card mb-3">
-    <div class="card-header fw-semibold">기존 파이프라인</div>
+    <div class="card-header fw-semibold">파이프라인</div>
     <div class="card-body">
       <div class="d-flex flex-wrap gap-2 mb-3">
         <button class="btn btn-outline-primary" onclick="runTask('crawl')">크롤링 + 타겟 구성</button>
-        <button class="btn btn-outline-warning" onclick="runTask('payload')"> LLM 페이로드 생성</button>
-        <button class="btn btn-outline-success" onclick="runTask('scan')">스캔 실행</button>
+        <button class="btn btn-outline-warning" onclick="runTask('payload')">LLM 페이로드 생성</button>
+        <button class="btn btn-outline-secondary" onclick="runTask('fuzz')">퍼징 전략 수립</button>
+        <button class="btn btn-outline-danger" onclick="runTask('execute')">퍼징 실행</button>
+        <button class="btn btn-outline-success" onclick="runTask('validate')">취약점 판정</button>
       </div>
       <hr style="border-color:#e5e7eb">
       <div class="d-flex align-items-center gap-3 flex-wrap">
         <button class="btn btn-danger" onclick="runTaskAll()">전체 실행</button>
-        <a class="btn btn-outline-dark" href="/results">스캔 결과 보기</a>
         <a class="btn btn-outline-dark" href="/exec_results">실행 결과 보기</a>
+        <a class="btn btn-outline-success" href="/findings">취약점 결과 보기</a>
       </div>
     </div>
   </div>
@@ -831,6 +833,94 @@ def results_page():
     n_vuln = sum(1 for r in results if r.get("vulnerable"))
     rate   = n_vuln / max(total, 1) * 100
     return render_template_string(_RESULTS_HTML, results=results, total=total, n_vuln=n_vuln, rate=rate)
+
+
+_FINDINGS_HTML = """\
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <title>LADS - 취약점 결과</title>
+""" + _COMMON_HEAD + """
+</head>
+<body>
+<nav class="navbar navbar-light mb-4 px-3">
+  <div class="container-fluid">
+    <span class="navbar-brand fw-bold fs-4 me-3">LADS</span>
+    <span class="text-secondary me-auto"> · 취약점 결과</span>
+    <a href="/" class="btn btn-outline-dark btn-sm">대시보드</a>
+  </div>
+</nav>
+<div class="container-fluid px-4">
+{% if not findings %}
+  <div class="alert" style="background:#fff;border:1px solid #e5e7eb;color:#111;">
+    취약점 결과가 없습니다. 대시보드에서 취약점 판정을 먼저 실행하세요.
+  </div>
+{% else %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="row text-center">
+        <div class="col-4">
+          <div class="stat-num text-danger">{{ findings|length }}</div>
+          <div class="text-secondary small">발견된 취약점</div>
+        </div>
+        <div class="col-4">
+          <div class="stat-num text-warning">{{ xss_cnt }}</div>
+          <div class="text-secondary small">XSS</div>
+        </div>
+        <div class="col-4">
+          <div class="stat-num text-danger">{{ sqli_cnt }}</div>
+          <div class="text-secondary small">SQLi</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header fw-semibold">탐지된 취약점 목록</div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-borderless mb-0" style="font-size:.82rem;">
+          <thead>
+            <tr style="border-bottom:1px solid #e5e7eb;">
+              <th>취약점 유형</th><th>대상</th><th>파라미터</th>
+              <th>페이로드</th><th>상태코드</th><th>응답시간</th><th>증거</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for f in findings %}
+            <tr style="border-bottom:1px solid #f3f4f6; background:#fff8f8;">
+              <td><span class="badge bg-danger">{{ f.vuln_type or '-' }}</span></td>
+              <td class="text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ f.url or f.point }}</td>
+              <td><code>{{ f.param }}</code></td>
+              <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;">{{ f.payload }}</td>
+              <td>{{ f.status }}</td>
+              <td>{{ f.elapsed }}s</td>
+              <td class="text-danger fw-semibold">{{ f.evidence }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+</div>
+</body>
+</html>
+"""
+
+
+@app.route("/findings")
+def findings_page():
+    if not os.path.exists(FINDINGS_FILE):
+        return render_template_string(_FINDINGS_HTML, findings=None, xss_cnt=0, sqli_cnt=0)
+    try:
+        with open(FINDINGS_FILE, encoding="utf-8") as f:
+            findings = json.load(f)
+    except Exception as exc:
+        return f"결과 파일 읽기 오류: {exc}", 500
+    xss_cnt  = sum(1 for f in findings if "xss"  in (f.get("vuln_type") or "").lower())
+    sqli_cnt = sum(1 for f in findings if "sqli" in (f.get("vuln_type") or "").lower())
+    return render_template_string(_FINDINGS_HTML, findings=findings, xss_cnt=xss_cnt, sqli_cnt=sqli_cnt)
 
 
 @app.route("/exec_results")
