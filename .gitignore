@@ -12,3 +12,6 @@ log/
 
 # JSON result files - local only
 *.json
+
+# Debug logs
+debug-*.log
