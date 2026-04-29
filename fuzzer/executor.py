@@ -63,6 +63,7 @@ def execute(
             "inject_mode": inject_mode,
             "inject_location": inject_location,
             "inject_param": inject_param,
+            "meta": t.get("meta") or {},
             "error": None,
         }
 
@@ -145,7 +146,7 @@ def execute(
                     "status": resp.status_code,
                     "length": len(resp.content) if resp.content is not None else None,
                     "elapsed": round(elapsed, 3),
-                    "response_body": body_text[:5000] if body_text else None,
+                    "response_body": body_text[:20000] if body_text else None,
                 }
             )
         except requests.Timeout:

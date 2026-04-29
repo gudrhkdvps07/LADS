@@ -49,6 +49,7 @@ SCAN_RESULTS_FILE = os.getenv("SCAN_RESULTS_FILE", "results/scan_results_llm.jso
 PAYLOADS_META_FILE = os.getenv("PAYLOADS_META_FILE", "results/payloads_llm_meta.json")
 FUZZ_TASKS_FILE    = os.getenv("FUZZ_TASKS_FILE",   "fuzz_tasks.json")
 EXEC_RESULTS_FILE  = os.getenv("EXEC_RESULTS_FILE", "execution_results.json")
+FINDINGS_FILE      = os.getenv("FINDINGS_FILE",     "results/findings.json")
 
 app = Flask(__name__)
 _task_lock    = threading.Lock()
@@ -181,7 +182,6 @@ def _task_scan():
 
 
 def _task_fuzz():
-    """Step 7: Fuzzing Strategy Engine"""
     from fuzzer.fuzzing_strategy import build_tasks
 
     if not os.path.exists(PAYLOADS_FILE):
@@ -204,7 +204,7 @@ def _task_fuzz():
         with open(TARGETS_FILE, encoding="utf-8") as f:
             targets = json.load(f)
 
-    print(f"[Step 7] meta={len(points_meta)} payload_points={len(payloads)}")
+    print(f"meta={len(points_meta)} payload_points={len(payloads)}")
     tasks = build_tasks(points_meta, payloads, targets)
 
     with open(FUZZ_TASKS_FILE, "w", encoding="utf-8") as f:
@@ -212,28 +212,48 @@ def _task_fuzz():
 
     replace_ = sum(1 for t in tasks if t.get("inject_mode") == "replace")
     append_  = sum(1 for t in tasks if t.get("inject_mode") == "append")
-    print(f"[Step 7] 완료: {len(tasks)} 태스크 → {FUZZ_TASKS_FILE}")
+    print(f"완료: {len(tasks)} 태스크 → {FUZZ_TASKS_FILE}")
     print(f"         mode  → replace: {replace_}, append: {append_}")
 
 
 def _task_execute():
-    """Step 8: Executor"""
+    """: Executor"""
     from fuzzer.executor import execute
 
     if not os.path.exists(FUZZ_TASKS_FILE):
-        print(f"[ERROR] {FUZZ_TASKS_FILE} 없음. Step 7 전략 수립을 먼저 실행하세요.")
+        print(f"[ERROR] {FUZZ_TASKS_FILE} 없음.  전략 수립을 먼저 실행하세요.")
         return
 
     with open(FUZZ_TASKS_FILE, encoding="utf-8") as f:
         tasks = json.load(f)
 
-    print(f"[Step 8] {len(tasks)} 태스크 실행 시작")
+    print(f"{len(tasks)} 태스크 실행 시작")
     results = execute(tasks, timeout=10, delay=0.0, output_file=EXEC_RESULTS_FILE)
 
     ok      = sum(1 for r in results if r["error"] is None)
     timeout = sum(1 for r in results if r["error"] == "timeout")
     err     = sum(1 for r in results if r["error"] and r["error"] != "timeout")
-    print(f"[Step 8] 완료: 성공 {ok} / 타임아웃 {timeout} / 오류 {err} → {EXEC_RESULTS_FILE}")
+    print(f"완료: 성공 {ok} / 타임아웃 {timeout} / 오류 {err} → {EXEC_RESULTS_FILE}")
+
+
+def _task_validate():
+    """Step 8.5: Validator - 응답 분석 → 취약점 판정"""
+    from fuzzer.validator import run as validate_run
+
+    if not os.path.exists(EXEC_RESULTS_FILE):
+        print(f"[ERROR] {EXEC_RESULTS_FILE} 없음. Step 8 실행을 먼저 하세요.")
+        return
+
+    print(f"[Validator] {EXEC_RESULTS_FILE} 분석 중...")
+    findings = validate_run(input_file=EXEC_RESULTS_FILE, output_file=FINDINGS_FILE)
+
+    xss_cnt  = sum(1 for f in findings if "xss" in (f.get("vuln_type") or "").lower())
+    sqli_cnt = sum(1 for f in findings if "sqli" in (f.get("vuln_type") or "").lower() or "sql" in (f.get("vuln_type") or "").lower())
+
+    print(f"[Validator] 완료: 취약점 {len(findings)}개 발견 → {FINDINGS_FILE}")
+    print(f"           XSS: {xss_cnt}개  /  SQLi: {sqli_cnt}개")
+    for f in findings:
+        print(f"  [{f['vuln_type']:20s}] {f['point']} | {f['payload'][:50]} | {f['evidence']}")
 
 
 def _task_all(skip_crawl: bool = False, skip_payload: bool = False):
@@ -251,21 +271,23 @@ def _task_all(skip_crawl: bool = False, skip_payload: bool = False):
 
 
 _TASK_FUNCS = {
-    "crawl"  : _task_crawl,
-    "payload": _task_payload,
-    "scan"   : _task_scan,
-    "fuzz"   : _task_fuzz,
-    "execute": _task_execute,
-    "all"    : _task_all,
+    "crawl"   : _task_crawl,
+    "payload" : _task_payload,
+    "scan"    : _task_scan,
+    "fuzz"    : _task_fuzz,
+    "execute" : _task_execute,
+    "validate": _task_validate,
+    "all"     : _task_all,
 }
 
 _TASK_LABELS = {
-    "crawl"  : "크롤링 + 타겟 구성",
-    "payload": "LLM 페이로드 생성",
-    "scan"   : "스캔 실행",
-    "fuzz"   : "Step 7 · 전략 수립",
-    "execute": "Step 8 · 실행",
-    "all"    : "전체 파이프라인",
+    "crawl"   : "크롤링 + 타겟 구성",
+    "payload" : "LLM 페이로드 생성",
+    "scan"    : "스캔 실행",
+    "fuzz"    : " · 전략 수립",
+    "execute" : " · 실행",
+    "validate": " · 취약점 판정",
+    "all"     : "전체 파이프라인",
 }
 
 
@@ -405,7 +427,7 @@ _MAIN_HTML = """\
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <title>LADS - LLM-Assisted DAST Scanner</title>
+  <title>LADS </title>
 """ + _COMMON_HEAD + """
 </head>
 <body>
@@ -413,45 +435,11 @@ _MAIN_HTML = """\
 <nav class="navbar navbar-light mb-4 px-3">
   <div class="container-fluid">
     <span class="navbar-brand fw-bold fs-4 me-3">LADS</span>
-    <span class="text-secondary me-auto">LLM-Assisted DAST Scanner</span>
-    <a href="/results" class="btn btn-outline-dark btn-sm me-2">스캔 결과</a>
-    <a href="/exec_results" class="btn btn-outline-dark btn-sm">실행 결과</a>
   </div>
 </nav>
 
 <div class="container">
   {% if false %}
-
-  <!-- 타겟 정보 -->
-  <div class="card mb-3">
-    <div class="card-header fw-semibold">타겟 정보</div>
-    <div class="card-body">
-      <div class="row mb-1">
-        <div class="col-sm-2 text-secondary">CMS</div>
-        <div class="col-sm-10">{{ cms_name }}</div>
-      </div>
-      <div class="row">
-        <div class="col-sm-2 text-secondary">URL</div>
-        <div class="col-sm-10"><a href="{{ base_url }}" target="_blank">{{ base_url }}</a></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 파일 상태 -->
-  <div class="card mb-3">
-    <div class="card-header fw-semibold">파일 상태</div>
-    <div class="card-body">
-      <div class="row g-2">
-        {% for label, ok in file_status %}
-        <div class="col-6 col-md-4">
-          <span class="badge w-100 py-2 {% if ok %}badge-ok{% else %}badge-none{% endif %}">
-            {{ label }}
-          </span>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
 
   <!-- 결과 요약 -->
   {% endif %}
@@ -476,17 +464,13 @@ _MAIN_HTML = """\
         {% endif %}
         {% if exec_summary %}
         <div class="col-12 mt-2 pt-2" style="border-top:1px solid #e5e7eb">
-          <span class="text-secondary small me-3">실행(Step 8)</span>
           <span class="text-info me-3">총 {{ exec_summary.total }}건</span>
           <span class="text-success me-3">성공 {{ exec_summary.ok }}</span>
           <span class="text-warning">타임아웃 {{ exec_summary.timeout }}</span>
         </div>
         {% endif %}
       </div>
-      <div class="text-center mt-3">
-        <a href="/results" class="btn btn-outline-info btn-sm me-2">스캔 결과 보기</a>
-        <a href="/exec_results" class="btn btn-outline-secondary btn-sm">실행 결과 보기</a>
-      </div>
+      
     </div>
   </div>
   {% endif %}
@@ -496,9 +480,9 @@ _MAIN_HTML = """\
     <div class="card-header fw-semibold">기존 파이프라인</div>
     <div class="card-body">
       <div class="d-flex flex-wrap gap-2 mb-3">
-        <button class="btn btn-outline-primary" onclick="runTask('crawl')">① 크롤링 + 타겟 구성</button>
-        <button class="btn btn-outline-warning" onclick="runTask('payload')">② LLM 페이로드 생성</button>
-        <button class="btn btn-outline-success" onclick="runTask('scan')">③ 스캔 실행</button>
+        <button class="btn btn-outline-primary" onclick="runTask('crawl')">크롤링 + 타겟 구성</button>
+        <button class="btn btn-outline-warning" onclick="runTask('payload')"> LLM 페이로드 생성</button>
+        <button class="btn btn-outline-success" onclick="runTask('scan')">스캔 실행</button>
       </div>
       <hr style="border-color:#e5e7eb">
       <div class="d-flex align-items-center gap-3 flex-wrap">
@@ -574,8 +558,8 @@ function _startStream(url) {
     if      (e.data.indexOf('[ERROR]') !== -1) line.style.color = '#111';
     else if (e.data.indexOf('[WARN]')  !== -1) line.style.color = '#111';
     else if (e.data.indexOf('완료')    !== -1) line.style.color = '#111';
-    else if (e.data.indexOf('Step 7')  !== -1) line.style.color = '#111';
-    else if (e.data.indexOf('Step 8')  !== -1) line.style.color = '#111';
+    else if (e.data.indexOf('')  !== -1) line.style.color = '#111';
+    else if (e.data.indexOf('')  !== -1) line.style.color = '#111';
     line.textContent = e.data;
     logArea.appendChild(line);
     logArea.scrollTop = logArea.scrollHeight;
@@ -684,7 +668,7 @@ _EXEC_HTML = """\
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <title>LADS - 실행 결과 (Step 8)</title>
+  <title>LADS - 실행 결과 ()</title>
 """ + _COMMON_HEAD + """
 </head>
 <body>
@@ -692,7 +676,7 @@ _EXEC_HTML = """\
 <nav class="navbar navbar-light mb-4 px-3">
   <div class="container-fluid">
     <span class="navbar-brand fw-bold fs-4 me-3">LADS</span>
-    <span class="text-secondary me-auto">Step 8 · 실행 결과</span>
+    <span class="text-secondary me-auto"> · 실행 결과</span>
     <a href="/" class="btn btn-outline-dark btn-sm">대시보드</a>
   </div>
 </nav>
@@ -700,7 +684,7 @@ _EXEC_HTML = """\
 <div class="container-fluid px-4">
 {% if not results %}
   <div class="alert" style="background:#fff;border:1px solid #e5e7eb;color:#111;">
-    실행 결과가 없습니다. 대시보드에서 Step 8 · 실행을 먼저 실행하세요.
+    실행 결과가 없습니다. 대시보드에서  · 실행을 먼저 실행하세요.
   </div>
 {% else %}
   <div class="card mb-4">
@@ -726,7 +710,7 @@ _EXEC_HTML = """\
     </div>
   </div>
   <div class="card">
-    <div class="card-header fw-semibold">실행 상세 (Step 8 Executor 출력)</div>
+    <div class="card-header fw-semibold">실행 상세 ( Executor 출력)</div>
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-borderless mb-0" style="font-size:.80rem;">
