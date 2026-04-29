@@ -193,3 +193,8 @@ if __name__ == "__main__":
 
     print(f"저장 완료: {OUTPUT_FILE}  ({len(targets)}개 타겟)")
     print_summary(targets)
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass

@@ -1384,3 +1384,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass

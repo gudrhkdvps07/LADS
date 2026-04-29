@@ -9,6 +9,7 @@ Usage:
 
 import json
 import argparse
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -171,6 +172,12 @@ def run(out_file: str = "payloads_v2.json"):
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_results, f, ensure_ascii=False, indent=2)
 
+    # Step 7에서 사용할 입력 지점 메타 저장
+    meta_out = os.getenv("PAYLOADS_META_FILE", "results/payloads_llm_meta.json")
+    os.makedirs(os.path.dirname(meta_out) or ".", exist_ok=True)
+    with open(meta_out, "w", encoding="utf-8") as f:
+        json.dump(INPUT_POINTS, f, ensure_ascii=False, indent=2)
+
     all_records = [
         r
         for point_data in all_results.values()
@@ -190,3 +197,8 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="results/payloads_v2.json")
     args = parser.parse_args()
     run(args.out)
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass

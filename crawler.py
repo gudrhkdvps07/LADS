@@ -508,3 +508,8 @@ if __name__ == "__main__":
     crawler.crawl()
     crawler.save()
     crawler.summary()
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass

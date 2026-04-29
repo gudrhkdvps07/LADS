@@ -63,3 +63,8 @@ if __name__ == "__main__":
         system="당신은 친절한 AI입니다.",
     )
     print(f"\n응답: {result}\n")
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass

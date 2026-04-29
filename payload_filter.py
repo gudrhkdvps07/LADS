@@ -186,3 +186,8 @@ SQLI_STRING | duplicate | admin'-- -
     print("최종 페이로드:")
     for r in final:
         print(f"  [{r['type']:20s}] {r['payload']}")
+    try:
+        from pause_on_exit import pause_if_enabled
+        pause_if_enabled()
+    except Exception:
+        pass
