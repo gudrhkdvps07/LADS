@@ -13,11 +13,19 @@ from typing import Optional
 
 load_dotenv()
 
-BASE_URL = os.getenv("TARGET_URL", "http://localhost")
+BASE_URL = os.getenv("TARGET_URL", "http://localhost:8080")
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", "crawl_result.json")
-LOGIN_URL      = os.getenv("LOGIN_URL", "")
-LOGIN_ID       = os.getenv("LOGIN_ID", "")
-LOGIN_PASSWORD = os.getenv("LOGIN_PASSWORD", "")
+
+# 로그인 관련 변수
+LOGIN_URL                 = os.getenv("LOGIN_URL", "")
+LOGIN_METHOD              = os.getenv("LOGIN_METHOD", "POST").upper()
+LOGIN_ID_FIELD            = os.getenv("LOGIN_ID_FIELD", "")
+LOGIN_PASSWORD_FIELD      = os.getenv("LOGIN_PASSWORD_FIELD", "")
+LOGIN_ID                  = os.getenv("LOGIN_ID", "")
+LOGIN_PASSWORD            = os.getenv("LOGIN_PASSWORD", "")
+LOGIN_SUCCESS_INDICATOR   = os.getenv("LOGIN_SUCCESS_INDICATOR", "")
+LOGIN_SUCCESS_URL_KEYWORD = os.getenv("LOGIN_SUCCESS_URL_KEYWORD", "")
+LOGIN_FAIL_INDICATOR      = os.getenv("LOGIN_FAIL_INDICATOR", "")
 
 
 # robots.txt/sitemap.xml 자동 발견 실패 시 사용하는 fallback 경로
@@ -88,8 +96,8 @@ class Crawler:
         self.base_url = base_url.rstrip("/")
         self.parsed_base = urlparse(base_url)
 
-        self.session = requests.Session() # 세션 사용으로 쿠키 유지 및 연결 재사용
-        self.session.headers.update({     # 요청 헤더를 브라우저 처럼 설정
+        self.session = requests.Session()
+        self.session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -98,6 +106,8 @@ class Crawler:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
         })
+
+        self.auth_cookies: dict = {}  # 로그인 성공시 쿠키가 저장되는 dict
 
         self.visited: set[str] = set()
         self.queue: deque[str] = deque()
@@ -334,6 +344,126 @@ class Crawler:
         except requests.RequestException as e:
             print(f"  [ERROR] {url} — {e}", file=sys.stderr)
             return None
+
+
+    # 로그인 폼의 hidden input 추출
+    def _extract_hidden_inputs(self, form_tag: BeautifulSoup) -> dict:
+        hidden = {}
+
+        if not form_tag:
+            return hidden
+
+        for inp in form_tag.find_all("input", {"type": "hidden"}):
+            name = inp.get("name")
+            if name:
+                hidden[name] = inp.get("value", "")
+
+        return hidden
+
+
+    # ID/PW 필드가 포함된 로그인 form 탐색
+    def _find_login_form(self, soup: BeautifulSoup):
+        for form in soup.find_all("form"):
+            has_id = form.find("input", {"name": LOGIN_ID_FIELD})
+            has_pw = form.find("input", {"name": LOGIN_PASSWORD_FIELD})
+
+            if has_id and has_pw:
+                return form
+
+        return soup.find("form")
+
+
+    # 로그인 수행 후 auth_cookies에 세션 쿠키 저장
+    def login(self) -> bool:
+        if not LOGIN_URL:
+            print("[LOGIN] LOGIN_URL 미설정 — 로그인 건너뜀", file=sys.stderr)
+            return False
+
+        if not LOGIN_ID_FIELD or not LOGIN_PASSWORD_FIELD:
+            print("[LOGIN] LOGIN_ID_FIELD / LOGIN_PASSWORD_FIELD 미설정", file=sys.stderr)
+            return False
+
+        try:
+            get_resp = self.session.get(
+                LOGIN_URL,
+                timeout=CrawlConfig.TIMEOUT,
+                allow_redirects=True,
+            )
+        except requests.RequestException as e:
+            print(f"[LOGIN] GET 실패: {e}", file=sys.stderr)
+            return False
+
+        soup = BeautifulSoup(get_resp.text, "lxml")
+
+        form_tag = self._find_login_form(soup)
+
+        if not form_tag:
+            print("[LOGIN] 로그인 form을 찾지 못함", file=sys.stderr)
+            return False
+
+        payload = self._extract_hidden_inputs(form_tag)
+        payload[LOGIN_ID_FIELD] = LOGIN_ID
+        payload[LOGIN_PASSWORD_FIELD] = LOGIN_PASSWORD
+
+        post_url = LOGIN_URL
+        if form_tag.get("action"):
+            post_url = urljoin(LOGIN_URL, form_tag.get("action"))
+
+        method = (LOGIN_METHOD or "POST").upper()
+
+        try:
+            if method == "GET":
+                post_resp = self.session.get(
+                    post_url,
+                    params=payload,
+                    timeout=CrawlConfig.TIMEOUT,
+                    allow_redirects=True,
+                )
+            else:
+                post_resp = self.session.post(
+                    post_url,
+                    data=payload,
+                    timeout=CrawlConfig.TIMEOUT,
+                    allow_redirects=True,
+                )
+        except requests.RequestException as e:
+            print(f"[LOGIN] 요청 실패: {e}", file=sys.stderr)
+            return False
+
+        body_lower = post_resp.text.lower()
+        final_url_lower = post_resp.url.lower()
+
+        fail_indicator = (LOGIN_FAIL_INDICATOR or "").lower()
+        success_indicator = (LOGIN_SUCCESS_INDICATOR or "").lower()
+        success_url_keyword = (LOGIN_SUCCESS_URL_KEYWORD or "").lower()
+
+        # 실패 지시자가 있으면 최우선 실패 처리
+        if fail_indicator and fail_indicator in body_lower:
+            print(f"[LOGIN] 실패 — 실패 지시자 감지: {LOGIN_FAIL_INDICATOR}", file=sys.stderr)
+            return False
+
+        # 성공 지시자 기반 판단
+        if success_indicator and success_indicator in body_lower:
+            self.auth_cookies = self.session.cookies.get_dict()
+            print(f"[LOGIN] 성공 — 성공 지시자 감지, 쿠키 {len(self.auth_cookies)}개")
+            return True
+
+        # 리다이렉트 최종 URL 기반 판단
+        if success_url_keyword and success_url_keyword in final_url_lower:
+            self.auth_cookies = self.session.cookies.get_dict()
+            print(f"[LOGIN] 성공 — URL 키워드 감지: {post_resp.url}, 쿠키 {len(self.auth_cookies)}개")
+            return True
+
+        # 쿠키는 보조 근거로만 출력하고 성공 처리하지 않음
+        acquired = self.session.cookies.get_dict()
+        if acquired:
+            print(
+                f"[LOGIN] 쿠키 {len(acquired)}개 획득. 유저 내용 기반이므로 성공으로 확정하지 않음",
+                file=sys.stderr,
+            )
+
+        print("[LOGIN] 로그인 실패 또는 성공 판단 기준 부족", file=sys.stderr)
+        return False
 
 
     def crawl(self, extra_seeds: list[str] = None) -> list[PageResult]:
