@@ -14,7 +14,7 @@ from typing import Optional
 load_dotenv()
 
 BASE_URL = os.getenv("TARGET_URL", "http://localhost:8080")
-OUTPUT_FILE = os.getenv("OUTPUT_FILE", "crawl_result.json")
+OUTPUT_FILE = os.getenv("OUTPUT_FILE", "results/crawl_result.json")
 
 # 로그인 관련 변수
 LOGIN_URL                 = os.getenv("LOGIN_URL", "")
@@ -362,12 +362,19 @@ class Crawler:
 
 
     # ID/PW 필드가 포함된 로그인 form 탐색
-    def _find_login_form(self, soup: BeautifulSoup):
-        for form in soup.find_all("form"):
-            has_id = form.find("input", {"name": LOGIN_ID_FIELD})
-            has_pw = form.find("input", {"name": LOGIN_PASSWORD_FIELD})
+    def _find_login_form(self, soup: BeautifulSoup, id_field: str = "", password_field: str = ""):
+        forms = soup.find_all("form")
 
-            if has_id and has_pw:
+        if id_field and password_field:
+            for form in forms:
+                has_id = form.find("input", {"name": id_field})
+                has_pw = form.find("input", {"name": password_field})
+
+                if has_id and has_pw:
+                    return form
+
+        for form in forms:
+            if self._infer_login_fields(form, id_field, password_field):
                 return form
 
         return soup.find("form")
@@ -375,17 +382,23 @@ class Crawler:
 
     # 로그인 수행 후 auth_cookies에 세션 쿠키 저장
     def login(self) -> bool:
-        if not LOGIN_URL:
-            print("[LOGIN] LOGIN_URL 미설정 — 로그인 건너뜀", file=sys.stderr)
-            return False
+        login_url = os.getenv("LOGIN_URL", LOGIN_URL)
+        login_method = os.getenv("LOGIN_METHOD", LOGIN_METHOD).upper()
+        login_id_field = os.getenv("LOGIN_ID_FIELD", LOGIN_ID_FIELD)
+        login_password_field = os.getenv("LOGIN_PASSWORD_FIELD", LOGIN_PASSWORD_FIELD)
+        login_id = os.getenv("LOGIN_ID", LOGIN_ID)
+        login_password = os.getenv("LOGIN_PASSWORD", LOGIN_PASSWORD)
+        login_success_indicator = os.getenv("LOGIN_SUCCESS_INDICATOR", LOGIN_SUCCESS_INDICATOR)
+        login_success_url_keyword = os.getenv("LOGIN_SUCCESS_URL_KEYWORD", LOGIN_SUCCESS_URL_KEYWORD)
+        login_fail_indicator = os.getenv("LOGIN_FAIL_INDICATOR", LOGIN_FAIL_INDICATOR)
 
-        if not LOGIN_ID_FIELD or not LOGIN_PASSWORD_FIELD:
-            print("[LOGIN] LOGIN_ID_FIELD / LOGIN_PASSWORD_FIELD 미설정", file=sys.stderr)
+        if not login_url:
+            print("[LOGIN] LOGIN_URL 미설정 — 로그인 건너뜀", file=sys.stderr)
             return False
 
         try:
             get_resp = self.session.get(
-                LOGIN_URL,
+                login_url,
                 timeout=CrawlConfig.TIMEOUT,
                 allow_redirects=True,
             )
@@ -395,21 +408,29 @@ class Crawler:
 
         soup = BeautifulSoup(get_resp.text, "lxml")
 
-        form_tag = self._find_login_form(soup)
+        form_tag = self._find_login_form(soup, login_id_field, login_password_field)
 
         if not form_tag:
             print("[LOGIN] 로그인 form을 찾지 못함", file=sys.stderr)
             return False
 
+        inferred = self._infer_login_fields(form_tag, login_id_field, login_password_field)
+        if not inferred:
+            print("[LOGIN] ID/PW 필드 자동 탐지 실패 — LOGIN_ID_FIELD / LOGIN_PASSWORD_FIELD 설정 필요", file=sys.stderr)
+            return False
+
+        login_id_field, login_password_field = inferred
+        print(f"[LOGIN] 필드 사용 — id={login_id_field}, password={login_password_field}")
+
         payload = self._extract_hidden_inputs(form_tag)
-        payload[LOGIN_ID_FIELD] = LOGIN_ID
-        payload[LOGIN_PASSWORD_FIELD] = LOGIN_PASSWORD
+        payload[login_id_field] = login_id
+        payload[login_password_field] = login_password
 
-        post_url = LOGIN_URL
+        post_url = login_url
         if form_tag.get("action"):
-            post_url = urljoin(LOGIN_URL, form_tag.get("action"))
+            post_url = urljoin(login_url, form_tag.get("action"))
 
-        method = (LOGIN_METHOD or "POST").upper()
+        method = (login_method or "POST").upper()
 
         try:
             if method == "GET":
@@ -433,13 +454,13 @@ class Crawler:
         body_lower = post_resp.text.lower()
         final_url_lower = post_resp.url.lower()
 
-        fail_indicator = (LOGIN_FAIL_INDICATOR or "").lower()
-        success_indicator = (LOGIN_SUCCESS_INDICATOR or "").lower()
-        success_url_keyword = (LOGIN_SUCCESS_URL_KEYWORD or "").lower()
+        fail_indicator = (login_fail_indicator or "").lower()
+        success_indicator = (login_success_indicator or "").lower()
+        success_url_keyword = (login_success_url_keyword or "").lower()
 
         # 실패 지시자가 있으면 최우선 실패 처리
         if fail_indicator and fail_indicator in body_lower:
-            print(f"[LOGIN] 실패 — 실패 지시자 감지: {LOGIN_FAIL_INDICATOR}", file=sys.stderr)
+            print(f"[LOGIN] 실패 — 실패 지시자 감지: {login_fail_indicator}", file=sys.stderr)
             return False
 
         # 성공 지시자 기반 판단
@@ -467,6 +488,10 @@ class Crawler:
 
 
     def crawl(self, extra_seeds: list[str] = None) -> list[PageResult]:
+        if os.getenv("LOGIN_URL", LOGIN_URL):
+            if not self.login():
+                print("[WARN] 로그인 실패 — 비로그인 상태로 크롤링을 계속합니다.", file=sys.stderr)
+
         seeds = self._discover_seeds()
         if extra_seeds:
             seeds.extend(extra_seeds)
@@ -574,6 +599,10 @@ class Crawler:
                 ],
                 "links_count": len(r.links),
             })
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
         with open(path, "w", encoding="utf-8") as fp:
             json.dump(data, fp, ensure_ascii=False, indent=2)
         print(f"결과 저장: {path}")

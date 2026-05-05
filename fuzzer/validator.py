@@ -121,7 +121,7 @@ def validate(results: list[dict]) -> list[dict]:
 
 
 def run(
-    input_file: str = "execution_results.json",
+    input_file: str = "results/execution_results.json",
     output_file: str = "results/findings.json",
 ) -> list[dict]:
     with open(input_file, encoding="utf-8") as f:

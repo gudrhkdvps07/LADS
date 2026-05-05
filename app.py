@@ -42,12 +42,7 @@ load_dotenv()
 # ── 설정 ─────────────────────────────────────────────────────────
 CMS_NAME = "Gnuboard5 5.3.2.8"
 
-from tasks import (
-    TASK_FUNCS, TASK_LABELS,
-    BASE_URL, CRAWL_RESULT_FILE, TARGETS_FILE,
-    PAYLOADS_FILE, SCAN_RESULTS_FILE, PAYLOADS_META_FILE,
-    FUZZ_TASKS_FILE, EXEC_RESULTS_FILE, FINDINGS_FILE,
-)
+import tasks
 
 app = Flask(__name__)
 _task_lock    = threading.Lock()
@@ -129,7 +124,7 @@ sys.stdout = _RoutingStream(sys.__stdout__)
 
 @app.route("/stream/<task>")
 def stream_task(task):
-    if task not in TASK_FUNCS:
+    if task not in tasks.TASK_FUNCS:
         return "알 수 없는 태스크", 404
 
     skip_crawl   = request.args.get("skip_crawl")   == "1"
@@ -146,9 +141,9 @@ def stream_task(task):
         _thread_local.log_queue = q
         try:
             if task == "all":
-                TASK_FUNCS["all"](skip_crawl=skip_crawl, skip_payload=skip_payload)
+                tasks.TASK_FUNCS["all"](skip_crawl=skip_crawl, skip_payload=skip_payload)
             else:
-                TASK_FUNCS[task]()
+                tasks.TASK_FUNCS[task]()
         except Exception as exc:
             q.put(f"[ERROR] {type(exc).__name__}: {exc}")
         finally:
@@ -159,7 +154,7 @@ def stream_task(task):
     threading.Thread(target=run_in_thread, daemon=True).start()
 
     def generate():
-        label = TASK_LABELS.get(task, task)
+        label = tasks.TASK_LABELS.get(task, task)
         yield f"data: [{label}] 시작\n\n"
         while True:
             try:
@@ -185,20 +180,20 @@ def stream_task(task):
 
 def _get_file_status():
     return [
-        ("crawl_result.json",      os.path.exists(CRAWL_RESULT_FILE)),
-        ("targets.json",           os.path.exists(TARGETS_FILE)),
-        ("payloads_llm.json",      os.path.exists(PAYLOADS_FILE)),
-        ("scan_results_llm.json",  os.path.exists(SCAN_RESULTS_FILE)),
-        ("fuzz_tasks.json",        os.path.exists(FUZZ_TASKS_FILE)),
-        ("execution_results.json", os.path.exists(EXEC_RESULTS_FILE)),
+        ("crawl_result.json",      os.path.exists(tasks.CRAWL_RESULT_FILE)),
+        ("targets.json",           os.path.exists(tasks.TARGETS_FILE)),
+        ("payloads_llm.json",      os.path.exists(tasks.PAYLOADS_FILE)),
+        ("scan_results_llm.json",  os.path.exists(tasks.SCAN_RESULTS_FILE)),
+        ("fuzz_tasks.json",        os.path.exists(tasks.FUZZ_TASKS_FILE)),
+        ("execution_results.json", os.path.exists(tasks.EXEC_RESULTS_FILE)),
     ]
 
 
 def _get_quick_summary():
-    if not os.path.exists(SCAN_RESULTS_FILE):
+    if not os.path.exists(tasks.SCAN_RESULTS_FILE):
         return None
     try:
-        with open(SCAN_RESULTS_FILE, encoding="utf-8") as f:
+        with open(tasks.SCAN_RESULTS_FILE, encoding="utf-8") as f:
             results = json.load(f)
         total = len(results)
         vulns = sum(1 for r in results if r.get("vulnerable"))
@@ -208,10 +203,10 @@ def _get_quick_summary():
 
 
 def _get_exec_summary():
-    if not os.path.exists(EXEC_RESULTS_FILE):
+    if not os.path.exists(tasks.EXEC_RESULTS_FILE):
         return None
     try:
-        with open(EXEC_RESULTS_FILE, encoding="utf-8") as f:
+        with open(tasks.EXEC_RESULTS_FILE, encoding="utf-8") as f:
             results = json.load(f)
         total   = len(results)
         ok      = sum(1 for r in results if r.get("error") is None)
@@ -634,7 +629,7 @@ def index():
     return render_template_string(
         _MAIN_HTML,
         cms_name     = CMS_NAME,
-        base_url     = BASE_URL,
+        base_url     = tasks.BASE_URL,
         file_status  = _get_file_status(),
         summary      = _get_quick_summary(),
         exec_summary = _get_exec_summary(),
@@ -656,10 +651,10 @@ def __debug_build():
 
 @app.route("/results")
 def results_page():
-    if not os.path.exists(SCAN_RESULTS_FILE):
+    if not os.path.exists(tasks.SCAN_RESULTS_FILE):
         return render_template_string(_RESULTS_HTML, results=None, total=0, n_vuln=0, rate=0.0)
     try:
-        with open(SCAN_RESULTS_FILE, encoding="utf-8") as f:
+        with open(tasks.SCAN_RESULTS_FILE, encoding="utf-8") as f:
             results = json.load(f)
     except Exception as exc:
         return f"결과 파일 읽기 오류: {exc}", 500
@@ -896,10 +891,10 @@ _FINDINGS_HTML = """\
 
 @app.route("/findings")
 def findings_page():
-    if not os.path.exists(FINDINGS_FILE):
+    if not os.path.exists(tasks.FINDINGS_FILE):
         return render_template_string(_FINDINGS_HTML, findings=None, xss_cnt=0, sqli_cnt=0)
     try:
-        with open(FINDINGS_FILE, encoding="utf-8") as f:
+        with open(tasks.FINDINGS_FILE, encoding="utf-8") as f:
             findings = json.load(f)
     except Exception as exc:
         return f"결과 파일 읽기 오류: {exc}", 500
@@ -910,10 +905,10 @@ def findings_page():
 
 @app.route("/exec_results")
 def exec_results_page():
-    if not os.path.exists(EXEC_RESULTS_FILE):
+    if not os.path.exists(tasks.EXEC_RESULTS_FILE):
         return render_template_string(_EXEC_HTML, results=None, total=0, ok=0, timeout=0, err=0)
     try:
-        with open(EXEC_RESULTS_FILE, encoding="utf-8") as f:
+        with open(tasks.EXEC_RESULTS_FILE, encoding="utf-8") as f:
             results = json.load(f)
     except Exception as exc:
         return f"결과 파일 읽기 오류: {exc}", 500
@@ -930,5 +925,5 @@ def exec_results_page():
 if __name__ == "__main__":
     os.makedirs("results", exist_ok=True)
     print(f"LADS 대시보드 시작: http://localhost:5000")
-    print(f"타겟: {BASE_URL}")
+    print(f"타겟: {tasks.BASE_URL}")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

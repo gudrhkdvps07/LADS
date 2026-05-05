@@ -6,13 +6,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL           = os.getenv("TARGET_URL",         "http://localhost:8080")
-CRAWL_RESULT_FILE  = os.getenv("CRAWL_RESULT",       "crawl_result.json")
-TARGETS_FILE       = os.getenv("TARGETS_FILE",        "targets.json")
+CRAWL_RESULT_FILE  = os.getenv("CRAWL_RESULT",       "results/crawl_result.json")
+TARGETS_FILE       = os.getenv("TARGETS_FILE",        "results/targets.json")
 PAYLOADS_FILE      = os.getenv("PAYLOADS_FILE",       "results/payloads_llm.json")
 SCAN_RESULTS_FILE  = os.getenv("SCAN_RESULTS_FILE",   "results/scan_results_llm.json")
 PAYLOADS_META_FILE = os.getenv("PAYLOADS_META_FILE",  "results/payloads_llm_meta.json")
-FUZZ_TASKS_FILE    = os.getenv("FUZZ_TASKS_FILE",     "fuzz_tasks.json")
-EXEC_RESULTS_FILE  = os.getenv("EXEC_RESULTS_FILE",   "execution_results.json")
+FUZZ_TASKS_FILE    = os.getenv("FUZZ_TASKS_FILE",     "results/fuzz_tasks.json")
+EXEC_RESULTS_FILE  = os.getenv("EXEC_RESULTS_FILE",   "results/execution_results.json")
 FINDINGS_FILE      = os.getenv("FINDINGS_FILE",       "results/findings.json")
 
 
@@ -157,6 +157,9 @@ def _task_all(skip_crawl: bool = False, skip_payload: bool = False):
         _task_payload()
 
     _task_scan()
+    _task_fuzz()
+    _task_execute()
+    _task_validate()
 
 
 def reload_config():
@@ -166,13 +169,13 @@ def reload_config():
     global EXEC_RESULTS_FILE, FINDINGS_FILE
     load_dotenv(override=True)
     BASE_URL           = os.getenv("TARGET_URL",         "http://34.68.27.120:8081")
-    CRAWL_RESULT_FILE  = os.getenv("CRAWL_RESULT",       "crawl_result.json")
-    TARGETS_FILE       = os.getenv("TARGETS_FILE",        "targets.json")
+    CRAWL_RESULT_FILE  = os.getenv("CRAWL_RESULT",       "results/crawl_result.json")
+    TARGETS_FILE       = os.getenv("TARGETS_FILE",        "results/targets.json")
     PAYLOADS_FILE      = os.getenv("PAYLOADS_FILE",       "results/payloads_llm.json")
     SCAN_RESULTS_FILE  = os.getenv("SCAN_RESULTS_FILE",   "results/scan_results_llm.json")
     PAYLOADS_META_FILE = os.getenv("PAYLOADS_META_FILE",  "results/payloads_llm_meta.json")
-    FUZZ_TASKS_FILE    = os.getenv("FUZZ_TASKS_FILE",     "fuzz_tasks.json")
-    EXEC_RESULTS_FILE  = os.getenv("EXEC_RESULTS_FILE",   "execution_results.json")
+    FUZZ_TASKS_FILE    = os.getenv("FUZZ_TASKS_FILE",     "results/fuzz_tasks.json")
+    EXEC_RESULTS_FILE  = os.getenv("EXEC_RESULTS_FILE",   "results/execution_results.json")
     FINDINGS_FILE      = os.getenv("FINDINGS_FILE",       "results/findings.json")
 
 

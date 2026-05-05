@@ -4,8 +4,8 @@ import sys
 import os
 from urllib.parse import urlparse
 
-INPUT_FILE = os.getenv("CRAWL_RESULT", "crawl_result.json")
-OUTPUT_FILE = os.getenv("TARGETS_FILE", "targets.json")
+INPUT_FILE  = os.getenv("CRAWL_RESULT",  "results/crawl_result.json")
+OUTPUT_FILE = os.getenv("TARGETS_FILE",  "results/targets.json")
 
 # CSRF/토큰/캡차 계열 필드는 공격 대상에서 제외
 CSRF_RE = re.compile(r"(csrf|token|nonce|_token|authenticity|captcha)", re.IGNORECASE)
@@ -187,6 +187,10 @@ if __name__ == "__main__":
         sys.exit(1)
 
     targets = build_targets(pages)
+
+    parent = os.path.dirname(OUTPUT_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(targets, f, ensure_ascii=False, indent=2)
