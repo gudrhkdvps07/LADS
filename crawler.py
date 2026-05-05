@@ -378,6 +378,98 @@ class Crawler:
                 return form
 
         return soup.find("form")
+    
+    
+    def _infer_login_fields(self, form_tag: BeautifulSoup, id_field: str = "", password_field: str = "") -> Optional[tuple[str, str]]:
+        inputs = form_tag.find_all("input")
+
+        password_name = password_field if password_field and form_tag.find("input", {"name": password_field}) else ""
+        if not password_name:
+            for inp in inputs:
+                name = inp.get("name", "")
+                input_type = inp.get("type", "text").lower()
+                haystack = " ".join([
+                    name,
+                    inp.get("id", ""),
+                    inp.get("placeholder", ""),
+                    inp.get("autocomplete", ""),
+                ]).lower()
+
+                if name and (input_type == "password" or "pass" in haystack or "passwd" in haystack or "pw" in haystack):
+                    password_name = name
+                    break
+
+        id_name = id_field if id_field and form_tag.find("input", {"name": id_field}) else ""
+        if not id_name:
+            candidates = []
+            for idx, inp in enumerate(inputs):
+                name = inp.get("name", "")
+                input_type = inp.get("type", "text").lower()
+                if not name or name == password_name or input_type in {"hidden", "password", "submit", "button", "checkbox", "radio"}:
+                    continue
+
+                haystack = " ".join([
+                    name,
+                    inp.get("id", ""),
+                    inp.get("placeholder", ""),
+                    inp.get("autocomplete", ""),
+                ]).lower()
+
+                score = 0
+                if input_type in {"text", "email", "tel"}:
+                    score += 2
+                if any(token in haystack for token in ["login", "user", "userid", "username", "email", "member", "mb_id", "id"]):
+                    score += 5
+                if "email" in haystack:
+                    score += 2
+                if password_name:
+                    password_idx = next((i for i, p in enumerate(inputs) if p.get("name") == password_name), idx)
+                    if idx < password_idx:
+                        score += 1
+
+                candidates.append((score, -idx, name))
+
+            if candidates:
+                id_name = max(candidates)[2]
+
+        if id_name and password_name:
+            return id_name, password_name
+        return None
+
+
+    def _heuristic_login_check(
+        self,
+        post_resp: requests.Response,
+        login_url: str,
+        login_password_field: str,
+        pre_post_cookies: set,
+    ) -> Optional[str]:
+        """성공/실패 지시자가 없을 때 휴리스틱으로 로그인 성공 여부 판단.
+        성공 근거 문자열 반환, 판단 불가면 None."""
+
+        # 1. 리다이렉트: 최종 URL 경로가 로그인 URL과 다르면 성공 추정
+        login_path = urlparse(login_url).path.rstrip("/") or "/"
+        final_path = urlparse(post_resp.url).path.rstrip("/") or "/"
+        if final_path != login_path:
+            return f"로그인 페이지 이탈 ({post_resp.url})"
+
+        # 2. 폼 소멸: 로그인 URL 재요청 시 비밀번호 필드가 사라졌으면 성공 추정
+        try:
+            recheck = self.session.get(login_url, timeout=CrawlConfig.TIMEOUT, allow_redirects=True)
+            recheck_soup = BeautifulSoup(recheck.text, "lxml")
+            if login_password_field and not recheck_soup.find("input", {"name": login_password_field}):
+                return f"'{login_password_field}' 필드 소멸"
+            if not recheck_soup.find("input", {"type": "password"}):
+                return "비밀번호 입력 필드 소멸"
+        except requests.RequestException:
+            pass
+
+        # 3. 신규 쿠키: POST 이후 없던 쿠키가 생겼으면 성공 추정
+        new_cookies = set(self.session.cookies.keys()) - pre_post_cookies
+        if new_cookies:
+            return f"신규 쿠키 생성: {new_cookies}"
+
+        return None
 
 
     # 로그인 수행 후 auth_cookies에 세션 쿠키 저장
@@ -431,6 +523,7 @@ class Crawler:
             post_url = urljoin(login_url, form_tag.get("action"))
 
         method = (login_method or "POST").upper()
+        pre_post_cookies = set(self.session.cookies.keys())
 
         try:
             if method == "GET":
@@ -475,15 +568,15 @@ class Crawler:
             print(f"[LOGIN] 성공 — URL 키워드 감지: {post_resp.url}, 쿠키 {len(self.auth_cookies)}개")
             return True
 
-        # 쿠키는 보조 근거로만 출력하고 성공 처리하지 않음
-        acquired = self.session.cookies.get_dict()
-        if acquired:
-            print(
-                f"[LOGIN] 쿠키 {len(acquired)}개 획득. 유저 내용 기반이므로 성공으로 확정하지 않음",
-                file=sys.stderr,
-            )
+        # 명시적 지시자 없음 — 휴리스틱 판단
+        reason = self._heuristic_login_check(post_resp, login_url, login_password_field, pre_post_cookies)
+        if reason:
+            self.auth_cookies = self.session.cookies.get_dict()
+            print(f"[LOGIN] 성공 추정 (휴리스틱) — {reason}, 쿠키 {len(self.auth_cookies)}개")
+            print("[HINT] 정확한 판단을 위해 LOGIN_SUCCESS_INDICATOR 또는 LOGIN_SUCCESS_URL_KEYWORD 설정을 권장합니다")
+            return True
 
-        print("[LOGIN] 로그인 실패 또는 성공 판단 기준 부족", file=sys.stderr)
+        print("[LOGIN] 로그인 실패 — 성공 근거를 찾지 못했습니다", file=sys.stderr)
         return False
 
 
@@ -616,7 +709,9 @@ class Crawler:
         get_forms = [(url, f) for url, f in all_forms if f.method == "GET"]
 
         sep = "=" * 60
-        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sum_log.txt")
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "sum_log.txt")
 
         # 로그 파일에 요약 저장
         with open(log_path, "w", encoding="utf-8") as log:
@@ -659,7 +754,7 @@ class Crawler:
 
 
 if __name__ == "__main__":
-    if not BASE_URL or BASE_URL == "http://localhost":
+    if not BASE_URL or BASE_URL == "http://localhost:8080":
         print("[ERROR] TARGET_URL이 .env에 설정되지 않았습니다.", file=sys.stderr)
         sys.exit(1)
 

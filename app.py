@@ -50,7 +50,9 @@ _thread_local = threading.local()
 
 
 # #region agent log
-_DBG_LOG_PATH = Path(__file__).with_name("debug-3194ca.log")
+_DBG_LOG_DIR  = Path(__file__).parent / "log"
+_DBG_LOG_DIR.mkdir(exist_ok=True)
+_DBG_LOG_PATH = _DBG_LOG_DIR / "debug-3194ca.log"
 _DBG_BUILD_ID = os.getenv("LADS_BUILD_ID") or datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
 
 
