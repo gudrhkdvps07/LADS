@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 import requests
 
 # 임계치
-SIMILARITY_THRESHOLD = 0.9
+SIMILARITY_THRESHOLD = 0.8
 VOTES_NEEDED         = 2
 
 # 에러, 권한거부 패턴

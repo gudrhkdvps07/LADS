@@ -167,27 +167,9 @@ def _task_bac_stream(run_path_fn, target_url=None, emit_progress=None):
     _task_bac_crawl(run_path_fn, target_url,
                     emit_progress=lambda pct: _prog(emit_progress, int(pct * 20 / 20)))
 
-    # 2. 수직 권한 상승 프로브 (probe 직전 재로그인으로 세션 갱신)
+    # 2. 수직 권한 상승 프로브 — findings.json 직접 생성
     _task_bac_vertical(run_path_fn, target_url=target_url,
-                       emit_progress=lambda pct: _prog(emit_progress, 20 + int(pct * 70 / 100)))
-
-    bac_results_file = run_path_fn("bac_vertical_results.json")
-    bac_findings_file = run_path_fn("bac_findings.json")
-
-    if not os.path.exists(bac_results_file):
-        print("[BAC] 실행 결과 없음 — 분석 건너뜀")
-        _prog(emit_progress, 100)
-        return
-
-    results = load_json(bac_results_file, [])
-
-    run_meta  = load_json(run_path_fn("run_meta.json"), {})
-    login_url = run_meta.get("login_url", "")
-    home_url  = run_meta.get("target_url", "")
-    findings = analyze_results(results, login_url=login_url, home_url=home_url)
-    save_findings(findings, bac_findings_file)
-    bac_cnt = sum(1 for f in findings if f.get("module") == "bac")
-    print(f"[BAC] 분석 완료: findings={len(findings)}, bac={bac_cnt}")
+                       emit_progress=lambda pct: _prog(emit_progress, 20 + int(pct * 80 / 100)))
     _prog(emit_progress, 100)
 
 

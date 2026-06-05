@@ -3,95 +3,142 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import time
 from typing import Callable
-from urllib.parse import urlparse
-from utilities import load_json, save_json
+from urllib.parse import urlparse, parse_qs
+from utilities import load_json
 from crawl.auth import load_cookies
-from probe.executor import execute
+from findings import (
+    bac_finding, save_findings,
+    BAC_SUSPECTED_HIGH, BAC_SUSPECTED_MEDIUM,
+    HIGH, MEDIUM,
+)
+import requests
 
-
-ROLE_ORDER = ("guest", "member1", "admin")
-TASKS_FILE = "bac_vertical_tasks.json"
-RESULTS_FILE = "bac_vertical_results.json"
+ROLE_ORDER   = ("guest", "member1", "admin")
 MEMBER_ROLES = {"member", "member1", "member2", "user"}
-GUEST_ROLES = {"guest"}
+GUEST_ROLES  = {"guest"}
 
-# 관리자 URL 패턴
 ADMIN_PATH_RE = re.compile(
     r"/(?:adm|admin|administrator|admincp|wp-admin|manager|manage|management|"
     r"backend|backoffice|console|control-panel|controlpanel|cpanel|dashboard|staff)(?:/|$)",
     re.IGNORECASE,
 )
 
-# 상태 변환을 시킬 수 있는 위험한 URL 패턴
 DESTRUCTIVE_PATH_RE = re.compile(
     r"(delete|del_|remove|update|insert|write_update|save|logout|upload|drop)",
     re.IGNORECASE,
 )
 
+_ERROR_PATTERNS = [
+    re.compile(r'권한이?\s*없', re.IGNORECASE),
+    re.compile(r'access\s+denied', re.IGNORECASE),
+    re.compile(r'forbidden', re.IGNORECASE),
+    re.compile(r'unauthorized', re.IGNORECASE),
+    re.compile(r'관리자만\s*(?:접근|이용)', re.IGNORECASE),
+    re.compile(r'잘못된\s*접근', re.IGNORECASE),
+    re.compile(
+        r'alert\s*\((?:[^)(]|\([^)]*\))*\)\s*;\s*(?:window\.close|history\.back|document\.location|location\.href|location\.replace|opener\.location)',
+        re.IGNORECASE | re.DOTALL,
+    ),
+]
 
-# 실행 경로 생성 함수가 없을 때 run_dir 기준 경로를 반환
+_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
+
 def make_run_path_fn(run_dir: str) -> Callable[[str], str]:
     return lambda filename: os.path.join(run_dir, filename)
 
 
-# 수직 권한 상승 테스트에서 위험한 URL인지 확인
 def _is_safe_get_candidate(url: str) -> bool:
     path = urlparse(url).path.lower()
     return not DESTRUCTIVE_PATH_RE.search(path)
 
 
-# 크롤 결과에서 수직 권한 테스트 URL 후보를 수집
+def _url_signature(url: str) -> tuple:
+    parsed = urlparse(url)
+    param_names = frozenset(parse_qs(parsed.query).keys())
+    return (parsed.path, param_names)
+
+
+def _fetch(url: str, cookies: dict, timeout: int) -> tuple[int, str]:
+    try:
+        resp = requests.get(
+            url,
+            cookies=cookies or {},
+            headers=_REQUEST_HEADERS,
+            timeout=timeout,
+            allow_redirects=True,
+        )
+        return resp.status_code, resp.text
+    except Exception:
+        return 0, ""
+
+
+def _is_blocked_body(body: str, status: int) -> bool:
+    if status != 200:
+        return True
+    return any(p.search(body) for p in _ERROR_PATTERNS)
+
+
 def collect_vertical_candidates(
     crawl_pages: list[dict],
     include_path_patterns: bool = True,
     limit: int | None = None,
 ) -> list[dict]:
     candidates: list[dict] = []
-    seen: set[str] = set()
+    seen_sigs: set[tuple] = set()
 
     for page in crawl_pages:
         url = page.get("url") or ""
-        if not url or url in seen or not _is_safe_get_candidate(url):
+        if not url or not _is_safe_get_candidate(url):
+            continue
+
+        sig = _url_signature(url)
+        if sig in seen_sigs:
             continue
 
         accessible_by = {str(r).lower() for r in page.get("accessible_by", [])}
-        admin_only = "admin" in accessible_by and not ((GUEST_ROLES | MEMBER_ROLES) & accessible_by)
+        admin_only  = "admin" in accessible_by and not ((GUEST_ROLES | MEMBER_ROLES) & accessible_by)
         member_only = bool(MEMBER_ROLES & accessible_by) and not (GUEST_ROLES & accessible_by)
 
         if admin_only:
-            source = "accessible_by_admin_only"
-            confidence = "high"
+            source        = "accessible_by_admin_only"
+            confidence    = "high"
             expected_role = "admin"
-            attack_roles = ["member1", "guest"]
-            scenario = "low_role_access_admin_url"
+            attack_roles  = ["member1", "guest"]
+            scenario      = "low_role_access_admin_url"
         elif member_only:
-            source = "accessible_by_member_only"
-            confidence = "high"
+            source        = "accessible_by_member_only"
+            confidence    = "high"
             expected_role = "member1"
-            attack_roles = ["guest"]
-            scenario = "member_only_guest_access"
+            attack_roles  = ["guest"]
+            scenario      = "member_only_guest_access"
         elif include_path_patterns and ADMIN_PATH_RE.search(urlparse(url).path):
-            source = "admin_path_pattern"
-            confidence = "low"
+            source        = "admin_path_pattern"
+            confidence    = "low"
             expected_role = "admin"
-            attack_roles = ["member1", "guest"]
-            scenario = "low_role_access_admin_url"
+            attack_roles  = ["member1", "guest"]
+            scenario      = "low_role_access_admin_url"
         else:
             continue
 
-        seen.add(url)
-        candidates.append(
-            {
-                "url": url,
-                "source": source,
-                "candidate_confidence": confidence,
-                "accessible_by": sorted(accessible_by),
-                "expected_role": expected_role,
-                "attack_roles": attack_roles,
-                "scenario": scenario,
-            }
-        )
+        seen_sigs.add(sig)
+        candidates.append({
+            "url":                  url,
+            "source":               source,
+            "candidate_confidence": confidence,
+            "accessible_by":        sorted(accessible_by),
+            "expected_role":        expected_role,
+            "attack_roles":         attack_roles,
+            "scenario":             scenario,
+        })
 
         if limit and len(candidates) >= limit:
             break
@@ -99,68 +146,6 @@ def collect_vertical_candidates(
     return candidates
 
 
-# 기존 호출부 호환을 위해 관리자 전용 후보만 반환
-def collect_admin_urls(
-    crawl_pages: list[dict],
-    include_path_patterns: bool = True,
-    limit: int | None = None,
-) -> list[dict]:
-    candidates = collect_vertical_candidates(
-        crawl_pages,
-        include_path_patterns=include_path_patterns,
-        limit=None,
-    )
-    admin_candidates = [c for c in candidates if c.get("scenario") == "low_role_access_admin_url"]
-    if limit:
-        return admin_candidates[:limit]
-    return admin_candidates
-
-
-# 수직 권한 URL 후보를 역할별 noop probe task로 변환
-def build_vertical_tasks(
-    candidates: list[dict],
-    role_cookies: dict[str, dict],
-) -> list[dict]:
-    tasks: list[dict] = []
-
-    for idx, candidate in enumerate(candidates, start=1):
-        scenario_id = f"bac_vertical_{idx:04d}"
-        roles = [candidate["expected_role"], *candidate.get("attack_roles", [])]
-        for role in roles:
-            if role not in role_cookies:
-                continue
-
-            tasks.append(
-                {
-                    "id": f"{scenario_id}_{role}",
-                    "point": scenario_id,
-                    "url": candidate["url"],
-                    "method": "GET",
-                    "inject_mode": "noop",
-                    "inject_location": "query",
-                    "inject_param": None,
-                    "base_params": {},
-                    "base_cookies": role_cookies.get(role) or {},
-                    "base_value": "",
-                    "payload": None,
-                    "meta": {
-                        "vuln_type": "bac_vertical",
-                        "scenario": candidate["scenario"],
-                        "scenario_id": scenario_id,
-                        "role": role,
-                        "expected_role": candidate["expected_role"],
-                        "attack_roles": candidate.get("attack_roles", []),
-                        "source": candidate["source"],
-                        "candidate_confidence": candidate["candidate_confidence"],
-                        "accessible_by": candidate.get("accessible_by", []),
-                    },
-                }
-            )
-
-    return tasks
-
-
-# 수직 권한 상승 테스트 task를 생성하고 실행 결과를 저장
 def run_vertical_probe(
     run_path_fn: Callable[[str], str],
     timeout: int = 10,
@@ -169,47 +154,96 @@ def run_vertical_probe(
     limit: int | None = None,
     progress_callback=None,
 ) -> list[dict]:
-    crawl_file = run_path_fn("crawl_result.json")
-    tasks_file = run_path_fn(TASKS_FILE)
-    results_file = run_path_fn(RESULTS_FILE)
+    crawl_file    = run_path_fn("crawl_result.json")
+    findings_file = run_path_fn("bac_findings.json")
 
-    crawl_pages = load_json(crawl_file, [])
+    crawl_pages  = load_json(crawl_file, [])
     role_cookies = load_cookies(run_path_fn)
-    candidates = collect_vertical_candidates(
+    candidates   = collect_vertical_candidates(
         crawl_pages,
         include_path_patterns=include_path_patterns,
         limit=limit,
     )
-    tasks = build_vertical_tasks(candidates, role_cookies)
-
-    save_json(tasks_file, tasks)
 
     scenario_counts: dict[str, int] = {}
-    for candidate in candidates:
-        scenario = candidate.get("scenario", "unknown")
-        scenario_counts[scenario] = scenario_counts.get(scenario, 0) + 1
+    for c in candidates:
+        s = c.get("scenario", "unknown")
+        scenario_counts[s] = scenario_counts.get(s, 0) + 1
 
-    print(f"[BAC] vertical candidates={len(candidates)}, tasks={len(tasks)}")
-    for scenario, count in sorted(scenario_counts.items()):
-        print(f"[BAC] scenario {scenario}={count}")
-    print(f"[BAC] tasks saved: {tasks_file}")
+    print(f"[BAC] vertical candidates={len(candidates)}")
+    for s, cnt in sorted(scenario_counts.items()):
+        print(f"[BAC] scenario {s}={cnt}")
 
-    if not tasks:
-        save_json(results_file, [])
-        return []
+    findings: list[dict] = []
+    total = len(candidates)
 
-    results = execute(
-        tasks,
-        timeout=timeout,
-        delay=delay,
-        output_file=results_file,
-        progress_callback=progress_callback,
-    )
-    print(f"[BAC] results saved: {results_file}")
-    return results
+    for idx, candidate in enumerate(candidates, start=1):
+        url           = candidate["url"]
+        expected_role = candidate["expected_role"]
+        attack_roles  = candidate["attack_roles"]
+        scenario      = candidate["scenario"]
+        cand_conf     = candidate["candidate_confidence"]
+
+        print(f"[BAC] [{idx}/{total}] {url}")
+        exp_status, exp_body = _fetch(url, role_cookies.get(expected_role, {}), timeout)
+
+        if _is_blocked_body(exp_body, exp_status):
+            if delay:
+                time.sleep(delay)
+            if progress_callback:
+                progress_callback(idx, total)
+            continue
+
+        for attack_role in attack_roles:
+            atk_status, atk_body = _fetch(url, role_cookies.get(attack_role, {}), timeout)
+
+            if _is_blocked_body(atk_body, atk_status):
+                continue
+
+            if exp_body != atk_body:
+                continue
+
+            if scenario == "member_only_guest_access":
+                f_type   = BAC_SUSPECTED_MEDIUM
+                f_conf   = MEDIUM
+                evidence = (
+                    f"BAC member_only: '{attack_role}'이 member 전용 URL '{url}'에 "
+                    f"접근이 가능합니다. (body 완전 일치, size={len(atk_body)})"
+                )
+            else:
+                f_type   = BAC_SUSPECTED_HIGH if cand_conf == "high" else BAC_SUSPECTED_MEDIUM
+                f_conf   = HIGH if cand_conf == "high" else MEDIUM
+                evidence = (
+                    f"BAC admin_only: '{attack_role}'이 admin URL '{url}'에 "
+                    f"접근이 가능합니다. (body 완전 일치, size={len(atk_body)})"
+                )
+
+            findings.append(bac_finding(
+                type=f_type,
+                category="admin_area" if "admin" in scenario else "member_area",
+                url=url,
+                status=atk_status,
+                confidence=f_conf,
+                evidence=evidence,
+                extra={
+                    "attack_role":   attack_role,
+                    "expected_role": expected_role,
+                    "scenario":      scenario,
+                    "source":        candidate["source"],
+                    "accessible_by": candidate.get("accessible_by", []),
+                },
+            ))
+
+        if delay:
+            time.sleep(delay)
+        if progress_callback:
+            progress_callback(idx, total)
+
+    save_findings(findings, findings_file)
+    print(f"[BAC] findings={len(findings)}, saved: {findings_file}")
+    return findings
 
 
-# CLI 인자를 파싱하여 수직 권한 상승 테스트를 실행
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", default="results")
