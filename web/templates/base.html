@@ -31,9 +31,69 @@
     }
   </script>
   <style>
-    * { letter-spacing: 0; }
+    * { box-sizing: border-box; min-width: 0; letter-spacing: 0; }
+    html, body { max-width: 100%; overflow-x: hidden; }
     body { font-family: "Noto Sans KR", Inter, system-ui, sans-serif; }
+    #app-shell { --sidebar-width: 16rem; }
+    img, svg, video, canvas { max-width: 100%; height: auto; }
+    table { max-width: 100%; }
+    pre, code, .font-mono { overflow-wrap: anywhere; }
     .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 450, 'GRAD' 0, 'opsz' 24; }
+    #sidebar {
+      width: var(--sidebar-width);
+      transform: translateX(-100%);
+      transition: none !important;
+    }
+    #app-shell.sidebar-open #sidebar { transform: translateX(0); }
+    #app-content {
+      width: 100%;
+      min-width: 0;
+      transition: none;
+    }
+    #app-shell.sidebar-open #app-content {
+      width: calc(100% - var(--sidebar-width));
+      margin-left: var(--sidebar-width);
+    }
+    #sidebar-backdrop.is-visible { display: block; }
+    #sidebar-resizer {
+      position: absolute;
+      top: 0;
+      right: -5px;
+      z-index: 50;
+      height: 100%;
+      width: 10px;
+      cursor: ew-resize;
+      touch-action: none;
+    }
+    #sidebar-resizer::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 4px;
+      height: 100%;
+      width: 2px;
+      background: transparent;
+      transition: background .12s ease;
+    }
+    #sidebar-resizer:hover::after,
+    #sidebar-resizer.is-resizing::after {
+      background: #94a3b8;
+    }
+    .menu-toggle-btn {
+      display: flex;
+      height: 36px;
+      width: 36px;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      color: #0f172a;
+      transition: background .15s ease;
+    }
+    .menu-toggle-btn:hover { background: #f1f5f9; }
+    #app-shell.sidebar-open #app-content [data-menu-toggle] {
+      display: none;
+    }
     .nav-link {
       display: flex; align-items: center; gap: 14px;
       padding: 16px 24px; color: #64748b; font-size: 15px;
@@ -44,9 +104,59 @@
       background: #eef2f7; color: #0f172a;
       border-right: 4px solid #0f172a; font-weight: 800;
     }
+    #app-shell.sidebar-compact .nav-link {
+      gap: 10px;
+      padding-left: 14px;
+      padding-right: 12px;
+      font-size: 13px;
+    }
+    #app-shell.sidebar-compact #sidebar .p-5 {
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+    #app-shell.sidebar-compact #sidebar .p-5 a {
+      padding-left: 8px;
+      padding-right: 8px;
+      font-size: 13px;
+    }
+    main, section, article, aside, header, footer, div { min-width: 0; }
+    @media (max-width: 767px) {
+      #app-shell.sidebar-open #app-content {
+        width: 100%;
+        margin-left: 0;
+      }
+      #sidebar {
+        width: min(var(--sidebar-width), calc(100vw - 48px));
+      }
+      #sidebar-resizer {
+        display: none;
+      }
+      main {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+      }
+      .nav-link {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+    }
+    @media (max-width: 480px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+      .action-primary,
+      .action-secondary,
+      .filter-btn,
+      .detail-filter-btn {
+        max-width: 100%;
+      }
+      h1, h2, h3, p, a, button, span, strong, td, th {
+        overflow-wrap: anywhere;
+      }
+    }
   </style>
 </head>
-<body class="min-h-screen bg-background text-[15px] text-slate-950 antialiased">
+<body id="app-shell" class="min-h-screen bg-background text-[15px] text-slate-950 antialiased">
   {% set path = request.path %}
 
   <!-- 모바일 백드롭 -->
@@ -55,14 +165,14 @@
 
   <!-- 사이드바 (모바일: 슬라이드-인 드로어 / md+: 항상 표시) -->
   <nav id="sidebar"
-       class="fixed left-0 top-0 z-40 flex h-full w-64 -translate-x-full flex-col border-r border-slate-200 bg-white font-medium text-slate-900 transition-transform duration-200 ease-in-out md:translate-x-0">
+       class="fixed left-0 top-0 z-40 flex h-full flex-col border-r border-slate-200 bg-white font-medium text-slate-900">
 
     <!-- 모바일 전용 드로어 헤더 -->
-    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 md:hidden">
+    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
       <span class="text-[17px] font-black tracking-tight">LADS</span>
       <button type="button" onclick="toggleMenu(false)" aria-label="메뉴 닫기"
-              class="flex h-8 w-8 items-center justify-center rounded hover:bg-slate-100">
-        <span class="material-symbols-outlined text-[22px]">close</span>
+              class="menu-toggle-btn" data-menu-toggle>
+        <span class="material-symbols-outlined text-[24px]">menu</span>
       </button>
     </div>
 
@@ -71,9 +181,23 @@
         <span class="material-symbols-outlined">timeline</span>
         파이프라인 모니터
       </a>
-      <a class="nav-link {% if path == '/findings' %}nav-active{% endif %}" href="/findings">
-        <span class="material-symbols-outlined">security</span>
-        취약점 목록
+      <a class="nav-link {% if path == '/bac' %}nav-active{% endif %}" href="/bac">
+        <span class="material-symbols-outlined">lock_open</span>
+        접근제어 점검
+      </a>
+      <a class="nav-link {% if path == '/targets' %}nav-active{% endif %}" href="/targets">
+        <span class="material-symbols-outlined">gps_fixed</span>
+        타깃 설정
+      </a>
+      <a class="nav-link {% if path == '/runs' or path.startswith('/runs/') %}nav-active{% endif %}" href="/runs">
+        <span class="material-symbols-outlined">history</span>
+        실행이력
+      </a>
+    </div>
+    <div class="hidden">
+      <a class="nav-link {% if path == '/' %}nav-active{% endif %}" href="/">
+        <span class="material-symbols-outlined">timeline</span>
+        파이프라인 모니터
       </a>
       <a class="nav-link {% if path == '/targets' %}nav-active{% endif %}" href="/targets">
         <span class="material-symbols-outlined">gps_fixed</span>
@@ -81,7 +205,7 @@
       </a>
       <a class="nav-link {% if path == '/bac' %}nav-active{% endif %}" href="/bac">
         <span class="material-symbols-outlined">lock_open</span>
-        BAC 진단
+        접근제어 점검
       </a>
       <a class="nav-link {% if path == '/runs' or path.startswith('/runs/') %}nav-active{% endif %}" href="/runs">
         <span class="material-symbols-outlined">history</span>
@@ -104,16 +228,17 @@
         전체 스캔 시작
       </a>
     </div>
+    <div id="sidebar-resizer" aria-label="사이드바 폭 조절" role="separator"></div>
   </nav>
 
-  <div class="min-h-screen md:ml-64">
+  <div id="app-content" class="min-h-screen">
     <!-- 모바일 상단 헤더 -->
-    <header class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 md:hidden">
+    <header class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4">
       <button type="button" onclick="toggleMenu()" aria-label="메뉴 열기"
-              class="flex h-9 w-9 items-center justify-center rounded hover:bg-slate-100">
+              class="menu-toggle-btn" data-menu-toggle>
         <span class="material-symbols-outlined text-[24px]">menu</span>
       </button>
-      <a class="text-[17px] font-black" href="/">LADS</a>
+      <div></div>
       <div class="w-9"></div>
     </header>
 

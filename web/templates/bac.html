@@ -1,9 +1,9 @@
-{% extends "base.html" %} {% block title %}LADS - BAC 진단{% endblock %}
+{% extends "base.html" %} {% block title %}LADS - 접근제어 점검{% endblock %}
 {% block content %}
 <div class="flex min-h-[calc(100vh-80px)] flex-col gap-6">
   <section class="flex shrink-0 flex-col justify-between gap-4 md:flex-row md:items-center">
     <div>
-      <h1 class="text-[30px] font-black leading-tight text-slate-950">BAC 수직 권한 상승 진단</h1>
+      <h1 class="text-[30px] font-black leading-tight text-slate-950">접근제어 점검</h1>
       <div class="mt-2 font-mono text-[13px] text-slate-500">Run: {{ current_run or '-' }}</div>
     </div>
     <div class="flex flex-wrap gap-2">
@@ -16,12 +16,12 @@
 
   <section class="rounded border border-surface-line bg-white p-6">
     <h2 class="mb-4 text-[18px] font-black text-slate-950">단계 상태</h2>
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class="grid gap-4 md:grid-cols-4">
       <div class="pipeline-step-card {{ 'complete' if has_crawl else 'pending' }}">
         <span class="pipeline-node">
           <span class="material-symbols-outlined text-[22px]">{{ 'check' if has_crawl else 'travel_explore' }}</span>
         </span>
-        <span class="pipeline-label">BAC 크롤링 (3세션)</span>
+        <span class="pipeline-label">크롤링 (3세션)</span>
         <span class="pipeline-status">{{ 'Done' if has_crawl else 'Waiting' }}</span>
       </div>
       <div class="pipeline-step-card {{ 'complete' if has_bac_results else 'pending' }}">
@@ -35,8 +35,15 @@
         <span class="pipeline-node">
           <span class="material-symbols-outlined text-[22px]">{{ 'check' if has_bac_findings else 'policy' }}</span>
         </span>
-        <span class="pipeline-label">취약점 분석</span>
+        <span class="pipeline-label">접근제어 분석</span>
         <span class="pipeline-status">{{ 'Done' if has_bac_findings else 'Waiting' }}</span>
+      </div>
+      <div class="pipeline-step-card {{ 'complete' if has_misconfig else 'pending' }}">
+        <span class="pipeline-node">
+          <span class="material-symbols-outlined text-[22px]">{{ 'check' if has_misconfig else 'settings_alert' }}</span>
+        </span>
+        <span class="pipeline-label">설정 오류 점검</span>
+        <span class="pipeline-status">{{ 'Done' if has_misconfig else 'Waiting' }}</span>
       </div>
     </div>
   </section>
@@ -65,8 +72,12 @@
       </div>
       <div class="flex flex-col gap-4 p-5">
         <div class="rounded bg-surface-soft p-4 text-center">
-          <div class="text-[13px] text-slate-500">BAC 취약점</div>
+          <div class="text-[13px] text-slate-500">접근제어 취약점</div>
           <div class="text-[40px] font-black {% if bac_cnt > 0 %}text-red-600{% else %}text-slate-950{% endif %}">{{ bac_cnt }}</div>
+        </div>
+        <div class="rounded bg-surface-soft p-4 text-center">
+          <div class="text-[13px] text-slate-500">설정 오류</div>
+          <div class="text-[40px] font-black {% if misconfig_cnt > 0 %}text-orange-600{% else %}text-slate-950{% endif %}">{{ misconfig_cnt }}</div>
         </div>
         <div id="bac-progress-wrap" class="hidden">
           <div class="mb-1 flex justify-between font-mono text-[11px] text-slate-500">
@@ -83,7 +94,7 @@
 
   {% if bac_findings %}
   <section class="rounded border border-surface-line bg-white p-6">
-    <h2 class="mb-4 text-[18px] font-black text-slate-950">BAC 취약점 목록</h2>
+    <h2 class="mb-4 text-[18px] font-black text-slate-950">접근제어 취약점 목록</h2>
     <div class="overflow-x-auto">
       <table class="w-full text-[13px]">
         <thead>
@@ -105,6 +116,38 @@
               <span class="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-700">{{ f.confidence or '-' }}</span>
             </td>
             <td class="max-w-[400px] truncate py-3 text-slate-600" title="{{ f.evidence }}">{{ f.evidence }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if misconfig_findings %}
+  <section class="rounded border border-surface-line bg-white p-6">
+    <h2 class="mb-4 text-[18px] font-black text-slate-950">설정 오류 목록</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-[13px]">
+        <thead>
+          <tr class="border-b border-surface-line text-left font-black text-slate-500">
+            <th class="pb-3 pr-4">항목</th>
+            <th class="pb-3 pr-4">위험도</th>
+            <th class="pb-3">설명</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in misconfig_findings %}
+          <tr class="border-b border-surface-line hover:bg-surface-soft">
+            <td class="py-3 pr-4 font-mono text-[12px] text-slate-700">{{ f.param or f.point or '-' }}</td>
+            <td class="py-3 pr-4">
+              <span class="rounded px-2 py-0.5 text-[11px] font-black
+                {% if 'CONFIRMED' in (f.type or '') %}bg-red-100 text-red-700
+                {% else %}bg-orange-100 text-orange-700{% endif %}">
+                {{ f.type or '-' }}
+              </span>
+            </td>
+            <td class="max-w-[500px] truncate py-3 text-slate-600" title="{{ f.evidence }}">{{ f.evidence or '-' }}</td>
           </tr>
           {% endfor %}
         </tbody>

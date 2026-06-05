@@ -23,8 +23,8 @@ TASK_LABELS = {
     "execute":  "퍼징 실행",
     "validate": "취약점 판정",
     "misconfig": "설정 오류 점검",
-    "bac":      "BAC 수직 권한 상승 테스트",
-    "all":      "전체 진단",
+    "bac":      "접근제어 점검",
+    "all":      "취약점 스캔",
 }
 
 # ======

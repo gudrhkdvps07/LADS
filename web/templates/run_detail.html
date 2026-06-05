@@ -31,25 +31,47 @@
 
   {# ── 파이프라인 상태 ── #}
   <div class="rounded border border-surface-line bg-white p-5">
-    <h2 class="mb-4 text-[15px] font-black text-slate-950">파이프라인 완료 상태</h2>
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-[15px] font-black text-slate-950">파이프라인 완료 상태</h2>
+      {% if step_timing.total %}
+      <span class="font-mono text-[12px] text-slate-500">총 소요: <span class="font-black text-slate-800">{{ "%.0f"|format(step_timing.total // 60) }}분 {{ "%.0f"|format(step_timing.total % 60) }}초</span></span>
+      {% endif %}
+    </div>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-7">
       {% set steps = [
-        ('크롤링',        has_crawl,    'travel_explore'),
-        ('페이로드',      has_payload,  'psychology'),
-        ('주입 테스트',   has_probe,    'radar'),
-        ('실행',          has_exec,     'terminal'),
-        ('취약점 판정',   has_findings, 'analytics'),
+        ('크롤링',      has_crawl,    'travel_explore', 'crawl'),
+        ('페이로드',    has_payload,  'psychology',     'payload'),
+        ('주입 테스트', has_probe,    'radar',          'probe'),
+        ('실행',        has_exec,     'terminal',       'execute'),
+        ('취약점 판정', has_findings, 'analytics',      'validate'),
+        ('BAC',         has_findings, 'shield_person',  'bac'),
+        ('Misconfig',   has_findings, 'security',       'misconfig'),
       ] %}
-      {% for label, done, icon in steps %}
-      <div class="flex items-center gap-3 rounded border px-3 py-3 {% if done %}border-emerald-200 bg-emerald-50{% else %}border-slate-200 bg-slate-50{% endif %}">
-        <span class="material-symbols-outlined text-[20px] shrink-0 {% if done %}text-emerald-600{% else %}text-slate-400{% endif %}">{{ icon }}</span>
+      {% for label, done, icon, key in steps %}
+      {% set elapsed = step_timing.get(key) %}
+      <div class="flex items-center gap-2 rounded border px-3 py-3 {% if done %}border-emerald-200 bg-emerald-50{% else %}border-slate-200 bg-slate-50{% endif %}">
+        <span class="material-symbols-outlined text-[18px] shrink-0 {% if done %}text-emerald-600{% else %}text-slate-400{% endif %}">{{ icon }}</span>
         <div class="min-w-0">
-          <div class="truncate text-[12px] font-extrabold {% if done %}text-emerald-700{% else %}text-slate-500{% endif %}">{{ label }}</div>
-          <div class="font-mono text-[11px] {% if done %}text-emerald-600{% else %}text-slate-400{% endif %}">{% if done %}Done{% else %}—{% endif %}</div>
+          <div class="truncate text-[11px] font-extrabold {% if done %}text-emerald-700{% else %}text-slate-500{% endif %}">{{ label }}</div>
+          {% if elapsed %}
+          <div class="font-mono text-[10px] text-slate-500">
+            {% if elapsed >= 60 %}{{ "%.0f"|format(elapsed // 60) }}m {{ "%.0f"|format(elapsed % 60) }}s
+            {% else %}{{ "%.1f"|format(elapsed) }}s{% endif %}
+          </div>
+          {% else %}
+          <div class="font-mono text-[10px] {% if done %}text-emerald-600{% else %}text-slate-400{% endif %}">{% if done %}Done{% else %}—{% endif %}</div>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
     </div>
+    {% if has_log %}
+    <div class="mt-3 text-right">
+      <a href="/runs/{{ run_id }}/scan.log" class="text-[11px] font-bold text-slate-400 hover:text-slate-700">
+        <span class="material-symbols-outlined align-middle text-[13px]">description</span> 스캔 로그 다운로드
+      </a>
+    </div>
+    {% endif %}
   </div>
 
   {# ── 요약 카드 ── #}
@@ -105,10 +127,9 @@
     </div>
   </div>
 
-  {# ── 취약점 상세 목록 (토글 + 필터) ── #}
+  {# ── 취약점 상세 목록 (URL 그룹 + 확장) ── #}
   {% if findings %}
   <div class="overflow-hidden rounded border border-surface-line bg-white">
-    {# 헤더 (클릭 토글) #}
     <button type="button" onclick="toggleSection('findings-body', 'findings-icon')"
             class="flex w-full items-center justify-between border-b border-surface-line bg-surface-soft px-6 py-4 text-left hover:bg-slate-100">
       <h2 class="text-[16px] font-black text-slate-950">
@@ -119,54 +140,36 @@
     </button>
 
     <div id="findings-body">
-      {# 필터 버튼 #}
-      <div class="flex flex-wrap gap-2 border-b border-surface-line px-6 py-3">
-        <button onclick="filterFindings('all')"   id="ff-all"   class="detail-filter-btn active">전체 ({{ findings|length }})</button>
-        {% if xss_cnt > 0 %}
-        <button onclick="filterFindings('xss')"   id="ff-xss"   class="detail-filter-btn">XSS ({{ xss_cnt }})</button>
-        {% endif %}
-        {% if sqli_cnt > 0 %}
-        <button onclick="filterFindings('sqli')"  id="ff-sqli"  class="detail-filter-btn">SQLi ({{ sqli_cnt }})</button>
-        {% endif %}
-        {% if bac_cnt > 0 %}
-        <button onclick="filterFindings('bac')"   id="ff-bac"   class="detail-filter-btn">BAC ({{ bac_cnt }})</button>
-        {% endif %}
-        {% if misconfig_cnt > 0 %}
-        <button onclick="filterFindings('misconfig')" id="ff-misconfig" class="detail-filter-btn">Misconfig ({{ misconfig_cnt }})</button>
-        {% endif %}
-      </div>
-
       <div class="overflow-auto px-6 py-4">
-        <table class="w-full min-w-[900px] border-separate border-spacing-0 text-left text-[13px]" id="findings-table">
+        <table class="w-full border-separate border-spacing-0 text-left text-[14px]" id="findings-table">
           <thead>
-            <tr class="text-[12px] font-bold text-slate-500">
-              <th class="border-b border-surface-line px-3 pb-2 whitespace-nowrap">유형</th>
-              <th class="border-b border-surface-line px-3 pb-2">URL</th>
-              <th class="border-b border-surface-line px-3 pb-2 whitespace-nowrap">파라미터</th>
-              <th class="border-b border-surface-line px-3 pb-2">페이로드</th>
-              <th class="border-b border-surface-line px-3 pb-2 whitespace-nowrap">상태</th>
-              <th class="border-b border-surface-line px-3 pb-2">근거</th>
+            <tr class="text-[13px] font-bold text-slate-500">
+              <th class="border-b border-surface-line px-4 pb-3 text-left">대상 URL</th>
+              <th class="border-b border-surface-line px-3 pb-3 text-center whitespace-nowrap">위험</th>
+              <th class="border-b border-surface-line px-3 pb-3 text-center whitespace-nowrap">경고</th>
+              <th class="border-b border-surface-line px-3 pb-3 text-center whitespace-nowrap">전체</th>
+              <th class="border-b border-surface-line px-3 pb-3"></th>
             </tr>
           </thead>
-          <tbody>
-            {% for f in findings %}
-            {% set mod = f.module or f.vuln_type or '' %}
-            <tr class="finding-row hover:bg-slate-50" data-module="{{ mod|lower }}">
-              <td class="border-b border-slate-100 px-3 py-2.5 whitespace-nowrap">
-                <span class="rounded px-2 py-1 font-mono text-[11px] font-extrabold
-                  {% if 'xss' in mod|lower %}bg-amber-100 text-amber-800
-                  {% elif 'sql' in mod|lower %}bg-red-100 text-red-800
-                  {% elif 'bac' in mod|lower %}bg-purple-100 text-purple-800
-                  {% elif 'misconfig' in mod|lower %}bg-blue-100 text-blue-800
-                  {% else %}bg-slate-100 text-slate-700{% endif %}">
-                  {{ mod or '-' }}
-                </span>
+          <tbody id="url-group-tbody">
+            {% for g in url_groups %}
+            <tr class="url-group-row hover:bg-slate-50 cursor-pointer" data-idx="{{ loop.index0 }}" onclick="toggleGroup({{ loop.index0 }})">
+              <td class="border-b border-slate-100 px-4 py-3 font-mono text-[12px] text-slate-700 max-w-[500px] truncate">{{ g.url }}</td>
+              <td class="border-b border-slate-100 px-3 py-3 text-center">
+                {% if g.danger > 0 %}<span class="font-bold text-error">{{ g.danger }}</span>{% else %}<span class="text-slate-300">0</span>{% endif %}
               </td>
-              <td class="max-w-[220px] truncate border-b border-slate-100 px-3 py-2.5 font-mono text-[11px] text-slate-600" title="{{ f.url }}">{{ f.url or f.point }}</td>
-              <td class="border-b border-slate-100 px-3 py-2.5 font-mono text-[11px] font-bold whitespace-nowrap">{{ f.param or '-' }}</td>
-              <td class="max-w-[280px] truncate border-b border-slate-100 px-3 py-2.5 font-mono text-[11px] text-slate-700" title="{{ f.payload }}">{{ f.payload or '-' }}</td>
-              <td class="border-b border-slate-100 px-3 py-2.5 font-mono text-[11px] whitespace-nowrap">{{ f.status or '-' }}</td>
-              <td class="max-w-[280px] truncate border-b border-slate-100 px-3 py-2.5 text-[12px] text-slate-600" title="{{ f.evidence }}">{{ f.evidence }}</td>
+              <td class="border-b border-slate-100 px-3 py-3 text-center">
+                {% if g.warning > 0 %}<span class="font-bold text-amber-600">{{ g.warning }}</span>{% else %}<span class="text-slate-300">0</span>{% endif %}
+              </td>
+              <td class="border-b border-slate-100 px-3 py-3 text-center text-slate-500 font-bold">{{ g.total }}</td>
+              <td class="border-b border-slate-100 px-3 py-3 text-center">
+                <span class="expand-icon text-slate-400 text-[18px] material-symbols-outlined">expand_more</span>
+              </td>
+            </tr>
+            <tr class="url-group-detail hidden" id="group-detail-{{ loop.index0 }}">
+              <td colspan="5" class="border-b border-slate-200 bg-slate-50 p-0">
+                <div class="detail-placeholder px-6 py-3 text-[12px] text-slate-400">로딩 중...</div>
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -174,6 +177,7 @@
       </div>
     </div>
   </div>
+  <script id="url-groups-data" type="application/json">{{ url_groups | tojson }}</script>
   {% endif %}
 
   {# ── 퍼징 실행 상세 (토글 + 필터) ── #}
@@ -253,6 +257,25 @@
 
 {% block scripts %}
 <style>
+  #findings-table th, #exec-table th { position: relative; }
+  .col-resizer {
+    position: absolute; right: -3px; top: 10%;
+    width: 8px; height: 80%;
+    cursor: col-resize; user-select: none; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .col-resizer::after {
+    content: '';
+    display: block;
+    width: 2px; height: 100%;
+    background: #cbd5e1;
+    border-radius: 2px;
+    transition: background .15s, width .15s;
+  }
+  .col-resizer:hover::after, .col-resizer.resizing::after {
+    background: #3b82f6;
+    width: 3px;
+  }
   .detail-filter-btn {
     padding: 5px 12px;
     border-radius: 4px;
@@ -280,14 +303,68 @@
     if (icon) icon.style.transform = hidden ? 'rotate(180deg)' : '';
   }
 
-  function filterFindings(mode) {
-    document.querySelectorAll('.finding-row').forEach(function(row) {
-      var mod = row.dataset.module || '';
-      row.style.display = (mode === 'all' || mod.indexOf(mode) !== -1) ? '' : 'none';
-    });
-    document.querySelectorAll('[id^="ff-"]').forEach(function(btn) { btn.classList.remove('active'); });
-    var active = document.getElementById('ff-' + mode);
-    if (active) active.classList.add('active');
+  // ── URL 그룹 토글 (findings.html 동일 패턴) ──
+  var _urlGroups = (function() {
+    try { return JSON.parse(document.getElementById('url-groups-data').textContent); } catch(e) { return []; }
+  })();
+  var _rendered = {};
+
+  function _statusLabel(s) {
+    if (s === 'danger')  return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#dc2626;white-space:nowrap;"><span style="width:8px;height:8px;border-radius:50%;background:#dc2626;flex-shrink:0;"></span>위험</span>';
+    if (s === 'warning') return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#d97706;white-space:nowrap;"><span style="width:8px;height:8px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></span>경고</span>';
+    return '<span style="display:inline-flex;align-items:center;gap:6px;font-weight:800;color:#94a3b8;white-space:nowrap;"><span style="width:8px;height:8px;border-radius:50%;background:#cbd5e1;flex-shrink:0;"></span>안전</span>';
+  }
+
+  function _typeColor(t) {
+    var k = (t||'').toLowerCase();
+    if (k.indexOf('xss') !== -1)       return 'background:#fef3c7;color:#92400e;';
+    if (k.indexOf('sql') !== -1)       return 'background:#fee2e2;color:#991b1b;';
+    if (k.indexOf('bac') !== -1)       return 'background:#f3e8ff;color:#6b21a8;';
+    if (k.indexOf('misconfig') !== -1) return 'background:#dbeafe;color:#1e40af;';
+    return 'background:#f1f5f9;color:#475569;';
+  }
+
+  function _renderGroup(idx) {
+    var g = _urlGroups[idx];
+    if (!g) return '';
+    var rows = g.items.map(function(item) {
+      return '<tr style="border-bottom:1px solid #f1f5f9;">' +
+        '<td style="padding:8px 12px;white-space:nowrap;">' + _statusLabel(item.status_label) + '</td>' +
+        '<td style="padding:8px 12px;">' + (item.vuln_type ? '<span style="border-radius:4px;padding:2px 8px;font-family:monospace;font-size:11px;' + _typeColor(item.vuln_type) + '">' + item.vuln_type + '</span>' : '-') + '</td>' +
+        '<td style="padding:8px 12px;font-family:monospace;font-size:11px;color:#475569;">' + (item.param || '-') + '</td>' +
+        '<td style="padding:8px 12px;font-family:monospace;font-size:11px;color:#334155;word-break:break-all;max-width:240px;">' + (item.payload ? item.payload.replace(/</g,'&lt;') : '-') + '</td>' +
+        '<td style="padding:8px 12px;font-family:monospace;font-size:11px;color:#64748b;">' + (item.status || '-') + '</td>' +
+        '<td style="padding:8px 12px;font-size:11px;color:#475569;word-break:break-all;max-width:300px;">' + (item.evidence ? item.evidence.replace(/</g,'&lt;') : '') + '</td>' +
+      '</tr>';
+    }).join('');
+    return '<table style="width:100%;border-collapse:collapse;font-size:12px;">' +
+      '<thead><tr style="font-size:11px;font-weight:700;color:#94a3b8;border-bottom:1px solid #e2e8f0;">' +
+        '<th style="padding:6px 12px;text-align:left;">상태</th>' +
+        '<th style="padding:6px 12px;text-align:left;">유형</th>' +
+        '<th style="padding:6px 12px;text-align:left;">파라미터</th>' +
+        '<th style="padding:6px 12px;text-align:left;">페이로드</th>' +
+        '<th style="padding:6px 12px;text-align:left;">HTTP</th>' +
+        '<th style="padding:6px 12px;text-align:left;">근거</th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>';
+  }
+
+  function toggleGroup(idx) {
+    var detail = document.getElementById('group-detail-' + idx);
+    var row = document.querySelector('.url-group-row[data-idx="' + idx + '"]');
+    if (!detail) return;
+    var isOpen = !detail.classList.contains('hidden');
+    if (isOpen) {
+      detail.classList.add('hidden');
+      if (row) { var icon = row.querySelector('.expand-icon'); if (icon) icon.textContent = 'expand_more'; }
+    } else {
+      if (!_rendered[idx]) {
+        detail.querySelector('.detail-placeholder').outerHTML = _renderGroup(idx);
+        _rendered[idx] = true;
+      }
+      detail.classList.remove('hidden');
+      if (row) { var icon = row.querySelector('.expand-icon'); if (icon) icon.textContent = 'expand_less'; }
+    }
   }
 
   function filterExec(mode) {
@@ -299,5 +376,42 @@
     var active = document.getElementById('ef-' + mode);
     if (active) active.classList.add('active');
   }
+
+  // ── 컬럼 리사이즈 ──
+  function makeResizable(tableId) {
+    var table = document.getElementById(tableId);
+    if (!table) return;
+    var ths = Array.from(table.querySelectorAll('thead th'));
+    ths.forEach(function (th) {
+      var r = document.createElement('div');
+      r.className = 'col-resizer';
+      th.appendChild(r);
+      r.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        // 드래그 시작 시 모든 컬럼 너비 고정 후 table-layout: fixed 적용
+        ths.forEach(function (t) { t.style.width = t.getBoundingClientRect().width + 'px'; });
+        table.style.tableLayout = 'fixed';
+        var sx = e.pageX;
+        var sw = th.getBoundingClientRect().width;
+        r.classList.add('resizing');
+        function mv(e) {
+          var w = sw + (e.pageX - sx);
+          if (w > 40) th.style.width = w + 'px';
+        }
+        function up() {
+          r.classList.remove('resizing');
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+        }
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      });
+      r.addEventListener('click', function (e) { e.stopPropagation(); });
+    });
+  }
+  makeResizable('findings-table');
+  makeResizable('exec-table');
+
 </script>
 {% endblock %}

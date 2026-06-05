@@ -95,7 +95,14 @@ def generate(run_id: str, run_dir: str) -> bytes:
     try:
         ts = datetime.strptime(run_id, "run_%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        ts = run_id
+        parts = run_id.split("-")
+        if len(parts) >= 4 and parts[0] == "run":
+            try:
+                ts = datetime.strptime(parts[2], "%Y%m%d").strftime("%Y-%m-%d")
+            except Exception:
+                ts = run_id
+        else:
+            ts = run_id
 
     xss_cnt       = sum(1 for f in findings if f.get("module") == "xss")
     sqli_cnt      = sum(1 for f in findings if f.get("module") == "sqli")

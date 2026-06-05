@@ -28,7 +28,7 @@ block content %}
   {% else %}
 
   <div
-    class="grid grid-cols-2 gap-3 sm:gap-4 sm:gap-5 {% if all_results %}sm:grid-cols-3 md:grid-cols-6{% else %}sm:grid-cols-3 md:grid-cols-5{% endif %}"
+    class="grid grid-cols-2 gap-3 sm:gap-4 sm:gap-5 {% if all_results %}sm:grid-cols-3 md:grid-cols-5{% else %}sm:grid-cols-3 md:grid-cols-5{% endif %}"
   >
     <div class="rounded border border-surface-line bg-white p-6">
       <span class="block text-[15px] font-bold text-slate-600">위험 탐지</span>
@@ -59,12 +59,6 @@ block content %}
       <span class="block text-[15px] font-bold text-slate-600">Misconfig</span>
       <strong class="mt-3 block text-[36px] font-black leading-none text-blue-600"
         >{{ misconfig_cnt }}</strong
-      >
-    </div>
-    <div class="rounded border border-surface-line bg-white p-6">
-      <span class="block text-[15px] font-bold text-slate-600">BAC</span>
-      <strong class="mt-3 block text-[36px] font-black leading-none text-orange-600"
-        >{{ bac_cnt }}</strong
       >
     </div>
     {% if all_results %}
@@ -119,7 +113,7 @@ block content %}
   >
     <div class="border-b border-surface-line bg-surface-soft px-6 py-4">
       <h2 class="text-[18px] font-black text-slate-950">
-        {% if all_results %}전체 진단 결과{% else %}위험 탐지 목록{% endif %}
+        {% if all_results %}취약점 스캔 결과{% else %}위험 탐지 목록{% endif %}
       </h2>
     </div>
     <div class="min-h-0 flex-1 overflow-auto px-6 py-5">
