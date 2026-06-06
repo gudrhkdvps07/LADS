@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urljoin
@@ -16,12 +17,46 @@ LOGIN_URL          = ""
 LOGIN_METHOD       = "POST"
 LOGIN_ID_1         = ""
 LOGIN_PASSWORD_1   = ""
-LOGIN_ID_2         = ""
-LOGIN_PASSWORD_2   = ""
 LOGIN_FAIL_INDICATOR = ""
-ADMIN_ID           = ""
-ADMIN_PASSWORD     = ""
 _TIMEOUT = 10
+
+
+# =====
+# DEMO ONLY - DVWA 발표 시연용 고정 세션
+# =====
+DEMO_DVWA_AUTH = os.getenv("DEMO_DVWA_AUTH", "0") == "1"
+DEMO_DVWA_PHPSESSID = os.getenv("DEMO_DVWA_PHPSESSID", "")
+
+def _demo_dvwa_role_sessions(roles: tuple[str, ...] | None = None) -> dict[str, dict]:
+    """
+    DEMO ONLY:
+    DVWA 발표 시연용 인증 우회.
+    브라우저에서 로그인 후 발급받은 PHPSESSID를 사용해 로그인 자동화를 건너뛴다.
+    실제 운영에서는 login() 자동화 또는 사용자 입력 쿠키 방식으로 대체해야 한다.
+    """
+    requested_roles = roles or ("guest", "member1")
+
+    if not DEMO_DVWA_PHPSESSID:
+        print("[DEMO - FAIL] DEMO_DVWA_AUTH=1 이지만 DEMO_DVWA_PHPSESSID가 비어 있음", file=sys.stderr)
+        return {"guest": {}}
+
+    demo_cookie = {
+        "security": "low",
+        "PHPSESSID": DEMO_DVWA_PHPSESSID,
+    }
+
+    role_sessions: dict[str, dict] = {}
+
+    if "guest" in requested_roles:
+        role_sessions["guest"] = {}
+
+    if "member1" in requested_roles:
+        role_sessions["member1"] = demo_cookie
+
+    print("[DEMO] DVWA auth bypass enabled: using preset session cookie")
+    return role_sessions
+
+
 
 # 인증상태 탐지용 힌트
 AUTH_TEXT_HINTS = (
@@ -425,8 +460,11 @@ def make_login(
     timeout: int = _TIMEOUT,
     roles: tuple[str, ...] | None = None,
 ) -> dict[str, dict]:
+
+    if DEMO_DVWA_AUTH:  # 데모용
+        return _demo_dvwa_role_sessions(roles)
     
-    requested_roles = roles or ("guest", "member1", "member2", "admin")
+    requested_roles = roles or ("guest", "member1")
     role_sessions: dict[str, dict] = {}
 
     if "guest" in requested_roles:
@@ -454,24 +492,6 @@ def make_login(
         else:
             print("[AUTH - FAIL] member1 login 실패; 스킵.", file=sys.stderr)
 
-    if "member2" in requested_roles and LOGIN_ID_2:
-        session = _make_session()
-        ok, cookies = login(session, login_id=LOGIN_ID_2, login_password=LOGIN_PASSWORD_2, **common)
-        if ok:
-            role_sessions["member2"] = cookies
-            print(f"[AUTH - OK] member2 login 성공: {len(cookies)} cookies")
-        else:
-            print("[AUTH - FAIL] member2 login 실패; 스킵.", file=sys.stderr)
-
-    if "admin" in requested_roles and ADMIN_ID:
-        session = _make_session()
-        ok, cookies = login(session, login_id=ADMIN_ID, login_password=ADMIN_PASSWORD, **common)
-        if ok:
-            role_sessions["admin"] = cookies
-            print(f"[AUTH - OK] admin login 성공: {len(cookies)} cookies")
-        else:
-            print("[AUTH - FAIL] admin login 실패; 스킵.", file=sys.stderr)
-
     return role_sessions
 
 
@@ -488,11 +508,8 @@ def save_cookies(run_path_fn, role_sessions):
 def load_cookies(run_path_fn: Callable[[str], str]) -> dict[str, dict]:
     all_cookies = load_json(run_path_fn("auth_cookies_roles.json"), {})
     role_cookies: dict[str, dict] = {"guest": {}}
-    for role in ("member1", "admin"):
-        cookies = all_cookies.get(role, {})
-        if role == "member1" and not cookies:
-            cookies = all_cookies.get("member", {})
-        if cookies:
-            role_cookies[role] = cookies
+    cookies = all_cookies.get("member1") or all_cookies.get("member", {})
+    if cookies:
+        role_cookies["member1"] = cookies
     return role_cookies
 

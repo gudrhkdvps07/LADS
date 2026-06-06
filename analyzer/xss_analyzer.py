@@ -5,7 +5,7 @@ import re
 from typing import Optional
 from .findings import HIGH, MEDIUM, LOW
 
-# REQ-XSS-007: 위험 실행 마커 목록 (컨텍스트별)
+# 위험 실행 마커 목록 (컨텍스트별)
 XSS_MARKERS = (
     # Event handler 패턴
     "onerror=alert",
@@ -39,7 +39,7 @@ _ENCODED_TOKENS = (
     "&#39;", "&amp;", "&#x27;",
 )
 
-# REQ-XSS-004: 컨텍스트 감지용 패턴
+# 컨텍스트 감지용 패턴
 _SCRIPT_OPEN_RE  = re.compile(r'<script[^>]*>', re.IGNORECASE)
 _SCRIPT_CLOSE_RE = re.compile(r'</script\s*>', re.IGNORECASE)
 _ATTR_URL_RE     = re.compile(
@@ -75,7 +75,7 @@ def _is_encoded(body: str, idx: int, marker_len: int, window: int = 20) -> bool:
 
 def _classify_reflection_context(body: str, needle: str) -> str:
     """
-    REQ-XSS-004: 응답 HTML 내에서 payload가 반사된 위치의 컨텍스트 분류.
+    응답 HTML 내에서 payload가 반사된 위치의 컨텍스트 분류.
 
     반환값:
         html_text       - <tag>PAYLOAD</tag> 일반 텍스트 노드
@@ -125,8 +125,7 @@ def _classify_reflection_context(body: str, needle: str) -> str:
 
 def _is_payload_html_escaped(payload: str, body: str) -> bool:
     """
-    REQ-XSS-005/006: payload 핵심 문자('<', '>', '"')가 HTML 엔티티로
-    변환되어 반사됐는지 확인한다.
+    payload 핵심 문자('<', '>', '"')가 HTML 엔티티로 변환되어 반사됐는지 확인
     """
     if not payload or not body:
         return False
@@ -169,10 +168,10 @@ def _check_payload_reflection(
     payload: str, body_raw: str
 ) -> Optional[tuple[str, bool, str]]:
     """
-    REQ-XSS-002/003: payload 반사 여부 확인.
+    payload 반사 여부 확인.
     반환: (evidence, is_escaped, context) or None
 
-    REQ-XSS-015: 단순 반사만으로 confirmed 불가 — 호출자가 판정.
+    단순 반사만으로 confirmed 불가 — 호출자가 판정.
     """
     if not payload:
         return None
@@ -196,10 +195,10 @@ def validate_xss(test_result: dict) -> tuple[bool, str, str]:
     """
     (found, evidence, confidence) 반환.
 
-    REQ-XSS-011: 반사 없으면 취약 아님
-    REQ-XSS-012: escape 된 반사 → info/제외 (False 반환)
-    REQ-XSS-013: 위험 컨텍스트 + 미escape → medium/high
-    REQ-XSS-015: 단순 문자열 반사만으로 confirmed/high 금지
+    반사 없으면 취약 아님
+    escape 된 반사 → info/제외 (False 반환)
+    위험 컨텍스트 + 미escape → medium/high
+    단순 문자열 반사만으로 confirmed/high 금지
     """
     if not test_result:
         return False, "검증 불가 (입력 없음)", ""
@@ -233,8 +232,8 @@ def validate_xss(test_result: dict) -> tuple[bool, str, str]:
         if is_escaped:
             return False, f"XSS payload escape됨 [{context}] — 실행 불가", ""
 
-        # REQ-XSS-015: 단순 반사만으로 confirmed/high 금지
-        # REQ-XSS-013: 위험 컨텍스트 + 미escape → medium
+        # 단순 반사만으로 confirmed/high 금지
+        # 위험 컨텍스트 + 미escape → medium
         if context in ("script_block", "html_attribute", "url_attribute"):
             return (
                 True,
@@ -245,5 +244,5 @@ def validate_xss(test_result: dict) -> tuple[bool, str, str]:
         # html_text/unknown: 단순 반사 → confirmed 불가
         return False, f"XSS payload 반사 (비위험 컨텍스트: {context}) — 단순 반사, confirmed 불가", ""
 
-    # REQ-XSS-011: 반사 없음
+    # 반사 없음
     return False, "안전함 (XSS 시그니처 미검출 / 인코딩됨)", ""

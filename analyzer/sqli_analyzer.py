@@ -9,15 +9,15 @@ from .findings import HIGH, MEDIUM, LOW
 SLEEP_THRESHOLD      = 4.5
 BOOL_GROUP_THRESHOLD = 0.05   # 5% 이상 응답 크기 차이
 ORDERBY_DIFF_THRES   = 0.10   # 10% 이상 응답 크기 차이
-TIME_CONFIRM_COUNT   = 2      # REQ-SQLI-015: 최소 2회 재검증
+TIME_CONFIRM_COUNT   = 2      # 최소 2회 재검증
 
-# REQ-SQLI-011/012: UNION 오류 패턴
+# UNION 오류 패턴
 UNION_ERROR_KEYWORDS = (
     "the used select statements have a different number",
     "column count doesn't match",
 )
 
-# REQ-SQLI-005/006: MySQL 및 공통 DBMS 에러 패턴
+# MySQL 및 공통 DBMS 에러 패턴
 DB_ERROR_KEYWORDS = (
     "you have an error in your sql syntax",
     "warning: mysql",
@@ -27,7 +27,7 @@ DB_ERROR_KEYWORDS = (
     "division by zero",
     "unknown column",
     "table 'g5_",
-    # REQ-SQLI-006: 필수 MySQL 에러 패턴
+    # 필수 MySQL 에러 패턴
     "mysql_fetch",
     "mysqli_",
     "mariadb server version",
@@ -158,9 +158,9 @@ def validate_sqli(test_result: dict) -> tuple[bool, str, str]:
     """
     단건 결과 검증. (found, evidence, confidence) 반환.
 
-    REQ-SQLI-016: Time-based 단건 → Phase 2 그룹 분석으로 위임
-    REQ-SQLI-018: 단건 DB 에러 → medium
-    REQ-SQLI-017/020: confirmed/high는 비교군이 있을 때만
+    Time-based 단건 → Phase 2 그룹 분석으로 위임
+    단건 DB 에러 → medium
+    confirmed/high는 비교군이 있을 때만
     """
     if not test_result:
         return False, "검증 불가 (입력 없음)", ""
@@ -171,7 +171,7 @@ def validate_sqli(test_result: dict) -> tuple[bool, str, str]:
 
     payload = test_result.get("payload") or ""
 
-    # REQ-SQLI-016: time-based 단건은 confirmed 금지 → Phase 2로 위임
+    # time-based 단건은 confirmed 금지 → Phase 2로 위임
     if resp["elapsed"] >= SLEEP_THRESHOLD and _is_time_based_payload(payload):
         return False, "time_candidate", ""
 
@@ -179,7 +179,7 @@ def validate_sqli(test_result: dict) -> tuple[bool, str, str]:
     if _is_group_candidate(payload):
         return False, "그룹 분석 대상 (Phase 2로 위임)", ""
 
-    # REQ-SQLI-018: 단건 DB 에러 → medium
+    # 단건 DB 에러 → medium
     msg = _check_error_based(resp["body"])
     if msg:
         return True, msg, MEDIUM
@@ -191,7 +191,6 @@ def validate_sqli(test_result: dict) -> tuple[bool, str, str]:
 
 def detect_timebased_group(results: list[dict]) -> list[dict]:
     """
-    REQ-SQLI-014 to REQ-SQLI-016:
     - baseline 응답 시간 먼저 측정
     - 2회 이상 재검증해야 confirmed/high
     - 단건 지연 → medium/suspected
@@ -234,7 +233,7 @@ def detect_timebased_group(results: list[dict]) -> list[dict]:
         )
         avg_elapsed = sum(float(r.get("elapsed") or 0) for r in group) / len(group)
 
-        # REQ-SQLI-015: 2회 이상 → confirmed/high
+        # 2회 이상 → confirmed/high
         if len(group) >= TIME_CONFIRM_COUNT:
             if avg_baseline is not None:
                 evidence = (
@@ -251,7 +250,7 @@ def detect_timebased_group(results: list[dict]) -> list[dict]:
         else:
             r0 = group[0]
             elapsed = float(r0.get("elapsed") or 0)
-            # REQ-SQLI-016: 단건 → medium/low (confirmed 불가)
+            # 단건 → medium/low (confirmed 불가)
             if avg_baseline is not None and avg_baseline < 1.5:
                 evidence = (
                     f"Time-based SQLi (suspected): 단일 지연 응답 ({elapsed:.2f}s, "
@@ -270,11 +269,10 @@ def detect_timebased_group(results: list[dict]) -> list[dict]:
 
 def detect_boolean_group(results: list[dict]) -> list[dict]:
     """
-    REQ-SQLI-007 to REQ-SQLI-010:
-    - REQ-SQLI-007: TRUE+FALSE 쌍 필수
-    - REQ-SQLI-008: TRUE 응답 ≈ baseline (safe 응답)
-    - REQ-SQLI-009: FALSE 응답 ≠ TRUE 응답 (≥5% 차이)
-    - REQ-SQLI-010/020: 비교군 없으면 confirmed/high 금지
+    - TRUE+FALSE 쌍 필수
+    - RUE 응답 ≈ baseline (safe 응답)
+    - FALSE 응답 ≠ TRUE 응답 (≥5% 차이)
+    - 비교군 없으면 confirmed/high 금지
     """
     sqli_results = [
         r for r in results
@@ -303,7 +301,7 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
         false_items = [r for r in group if _BOOL_FALSE.search(r.get("payload") or "")]
         baseline    = baseline_by_key.get(key, [])
 
-        # REQ-SQLI-010: TRUE+FALSE 쌍 없으면 confirmed 불가
+        # RUE+FALSE 쌍 없으면 confirmed 불가
         if not (true_items and false_items):
             candidate_items = true_items or false_items
             if not candidate_items:
@@ -314,7 +312,7 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
             evidence = (
                 f"Boolean SQLi candidate ({kind} only): "
                 f"{len(candidate_items)}개 페이로드, "
-                f"짝 페이로드 없어 응답 비교 불가{error_note} — REQ-SQLI-010"
+                f"짝 페이로드 없어 응답 비교 불가{error_note}"
             )
             detected.append({"result": candidate_items[0], "evidence": evidence, "confidence": LOW})
             continue
@@ -324,20 +322,20 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
         max_len   = max(avg_true, avg_false, 1)
         diff      = abs(avg_true - avg_false) / max_len
 
-        # REQ-SQLI-009: FALSE ≠ TRUE (≥5% 차이)
+        # FALSE ≠ TRUE (≥5% 차이)
         if diff < BOOL_GROUP_THRESHOLD:
             sample_body = (true_items[0].get("response_body") or "").lower()
             db_note = " + DB 에러 동반" if _has_db_error(sample_body) else ""
             evidence = (
                 f"Boolean SQLi candidate: true {len(true_items)}개/false {len(false_items)}개, "
-                f"응답 크기 차이 미미 (diff={diff:.1%}){db_note} — REQ-SQLI-009 미충족"
+                f"응답 크기 차이 미미 (diff={diff:.1%}){db_note}"
             )
             detected.append({"result": true_items[0], "evidence": evidence, "confidence": LOW})
             continue
 
         direction = "true>false" if avg_true > avg_false else "true<false"
 
-        # REQ-SQLI-008: TRUE ≈ baseline 비교
+        # TRUE ≈ baseline 비교
         if baseline:
             avg_baseline = sum(_body_length(r) for r in baseline) / len(baseline)
             baseline_diff = abs(avg_true - avg_baseline) / max(avg_true, avg_baseline, 1)
@@ -353,7 +351,6 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
                 best = max(true_items, key=_body_length)
                 detected.append({"result": best, "evidence": evidence, "confidence": MEDIUM})
             else:
-                # REQ-SQLI-007 ✅ REQ-SQLI-008 ✅ REQ-SQLI-009 ✅ → confirmed
                 evidence = (
                     f"Boolean-based SQLi (confirmed): "
                     f"true={avg_true:.0f}b ≈ baseline={avg_baseline:.0f}b, "
@@ -362,11 +359,11 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
                 best = max(true_items, key=_body_length)
                 detected.append({"result": best, "evidence": evidence, "confidence": HIGH})
         else:
-            # baseline 없음 → REQ-SQLI-008 미충족, medium만 가능
+            # baseline 없음 medium만 가능
             evidence = (
                 f"Boolean-based SQLi (suspected): "
                 f"true={avg_true:.0f}b, false={avg_false:.0f}b, diff={diff:.1%} ({direction}) "
-                f"— baseline 없음 (REQ-SQLI-008 미충족)"
+                f"— baseline 없음"
             )
             best = max(true_items, key=_body_length)
             detected.append({"result": best, "evidence": evidence, "confidence": MEDIUM})
@@ -433,10 +430,9 @@ def detect_probe_group(results: list[dict]) -> list[dict]:
 
 def detect_orderby_group(results: list[dict]) -> list[dict]:
     """
-    REQ-SQLI-011 to REQ-SQLI-013:
-    - REQ-SQLI-011: 정상 index + 비정상 index 쌍 비교 필수
-    - REQ-SQLI-012: 정상 ORDER BY ≈ baseline
-    - REQ-SQLI-013: 비정상 ORDER BY → SQL 에러 또는 응답 차이
+    - 정상 index + 비정상 index 쌍 비교 필수
+    - 정상 ORDER BY ≈ baseline
+    - 비정상 ORDER BY → SQL 에러 또는 응답 차이
     """
     orderby_results = [
         r for r in results
@@ -465,7 +461,7 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
     for key, group in groups.items():
         baseline = baseline_by_key.get(key, [])
 
-        # REQ-SQLI-011: 쌍 비교를 위해 최소 2개 필요
+        # 쌍 비교를 위해 최소 2개 필요
         if len(group) < 2:
             sample_body = (group[0].get("response_body") or "").lower()
             error_note = " + DB 에러 동반" if _has_db_error(sample_body) else ""
@@ -489,7 +485,7 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
             else:
                 evidence = (
                     f"ORDER BY SQLi candidate: 단일 페이로드, "
-                    f"비교용 쌍 없음{error_note} — REQ-SQLI-011 미충족"
+                    f"비교용 쌍 없음{error_note}"
                 )
                 detected.append({"result": group[0], "evidence": evidence, "confidence": LOW})
             continue
@@ -507,7 +503,7 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
             for r in group
         )
 
-        # REQ-SQLI-012/013: 쌍 비교에서 차이 or 에러 → confirmed
+        # 쌍 비교에서 차이 or 에러 → confirmed
         if diff >= ORDERBY_DIFF_THRES or has_error:
             extra = " + 'unknown column' 에러" if has_error else ""
             evidence = (
