@@ -51,6 +51,9 @@ _HTML_ENTITY_RE  = re.compile(
     re.IGNORECASE,
 )
 
+_BLOCKED_STATUSES = frozenset({403, 406})
+_MARKER_WINDOW = 200
+
 
 # ─── 헬퍼 ────────────────────────────────────────────────────────
 
@@ -63,6 +66,13 @@ def _extract_body(test_result: dict) -> str:
     if "response" in test_result and isinstance(test_result["response"], dict):
         bodies.append(test_result["response"].get("body") or "")
     return "\n".join(bodies)
+
+
+def _find_payload_in_body(payload: str, body_raw: str) -> int:
+    """payload의 시작 위치를 반환. 없으면 -1."""
+    if not payload or not body_raw:
+        return -1
+    return body_raw.lower().find(payload.lower())
 
 
 def _is_encoded(body: str, idx: int, marker_len: int, window: int = 20) -> bool:
@@ -94,7 +104,7 @@ def _classify_reflection_context(body: str, needle: str) -> str:
     if idx == -1:
         return "unknown"
 
-    prefix = body[max(0, idx - 500):idx]
+    prefix = body[:idx]
 
     # 1. HTML 주석 내부?
     last_comment_open  = prefix.rfind("<!--")
@@ -144,20 +154,28 @@ def _is_payload_html_escaped(payload: str, body: str) -> bool:
 
 # ─── 마커 체크 ───────────────────────────────────────────────────
 
-def _check_markers(body_lower: str, body_raw: str) -> Optional[tuple[str, str]]:
+def _check_markers_near_payload(
+    payload: str, body_raw: str, pay_idx: int
+) -> Optional[tuple[str, str]]:
     """
-    위험 마커를 찾아 (marker, context) 반환.
-    escape 된 경우 None 반환.
+    pay_idx 주변 _MARKER_WINDOW bytes 범위에서만 위험 마커를 검색한다.
+    body 전체 스캔 시 페이지 자체 JS가 오탐으로 잡히던 문제를 방지한다.
+    pay_idx는 호출자가 이미 계산한 값을 받아 중복 find() 호출을 없앤다.
     """
+    region_start = max(0, pay_idx - _MARKER_WINDOW)
+    region_end   = pay_idx + len(payload) + _MARKER_WINDOW
+    region       = body_raw[region_start:region_end]
+    region_lower = region.lower()
+
     for marker in XSS_MARKERS:
-        idx = body_lower.find(marker)
-        if idx == -1:
+        m_idx = region_lower.find(marker)
+        if m_idx == -1:
             continue
-        if _is_encoded(body_raw, idx, len(marker)):
+        if _is_encoded(region, m_idx, len(marker)):
             continue
-        # 실제 원문 위치로 컨텍스트 파악
-        raw_fragment = body_raw[idx: idx + len(marker)]
-        context = _classify_reflection_context(body_raw, raw_fragment)
+        abs_start    = region_start + m_idx
+        raw_fragment = body_raw[abs_start: abs_start + len(marker)]
+        context      = _classify_reflection_context(body_raw, raw_fragment)
         return marker, context
     return None
 
@@ -203,15 +221,24 @@ def validate_xss(test_result: dict) -> tuple[bool, str, str]:
     if not test_result:
         return False, "검증 불가 (입력 없음)", ""
 
+    # 게이트 1: 차단 응답
+    status = test_result.get("status")
+    if status in _BLOCKED_STATUSES:
+        return False, f"차단 응답 (HTTP {status}) — XSS 판정 불가", ""
+
     body_raw = _extract_body(test_result)
     if not body_raw:
         return False, "검증 불가 (응답 본문 없음)", ""
 
-    body_lower = body_raw.lower()
-    payload    = test_result.get("payload") or ""
+    payload = test_result.get("payload") or ""
 
-    # 1. 위험 마커 체크 (REQ-XSS-013/014)
-    marker_result = _check_markers(body_lower, body_raw)
+    # 게이트 2: payload 반사 여부 확인 (위치도 확보해 중복 find() 방지)
+    pay_idx = _find_payload_in_body(payload, body_raw)
+    if not payload or pay_idx == -1:
+        return False, "응답에 payload 미반사 — XSS 판정 불가", ""
+
+    # 마커 체크 (payload 위치 주변만)
+    marker_result = _check_markers_near_payload(payload, body_raw, pay_idx)
     if marker_result:
         marker, context = marker_result
         # REQ-XSS-004: 컨텍스트에 따라 신뢰도 결정
