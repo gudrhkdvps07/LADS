@@ -83,7 +83,7 @@ _SLEEP_RE       = re.compile(
 # ─── 헬퍼 ────────────────────────────────────────────────────────
 
 def _is_baseline_result(r: dict) -> bool:
-    """REQ-SQLI-014: baseline(안전한 원본값) 요청인지 확인."""
+    """baseline(안전한 원본값) 요청인지 확인."""
     meta = r.get("meta") or {}
     return meta.get("is_baseline", False) or meta.get("type") == "BASELINE"
 
@@ -301,72 +301,42 @@ def detect_boolean_group(results: list[dict]) -> list[dict]:
         false_items = [r for r in group if _BOOL_FALSE.search(r.get("payload") or "")]
         baseline    = baseline_by_key.get(key, [])
 
-        # RUE+FALSE 쌍 없으면 confirmed 불가
+        # 1. TRUE+FALSE 쌍 없으면 탈락
         if not (true_items and false_items):
-            candidate_items = true_items or false_items
-            if not candidate_items:
-                continue
-            kind = "TRUE" if true_items else "FALSE"
-            sample_body = (candidate_items[0].get("response_body") or "").lower()
-            error_note = " + DB 에러 동반" if _has_db_error(sample_body) else ""
-            evidence = (
-                f"Boolean SQLi candidate ({kind} only): "
-                f"{len(candidate_items)}개 페이로드, "
-                f"짝 페이로드 없어 응답 비교 불가{error_note}"
-            )
-            detected.append({"result": candidate_items[0], "evidence": evidence, "confidence": LOW})
             continue
 
-        avg_true  = sum(_body_length(r) for r in true_items)  / len(true_items)
-        avg_false = sum(_body_length(r) for r in false_items) / len(false_items)
-        max_len   = max(avg_true, avg_false, 1)
-        diff      = abs(avg_true - avg_false) / max_len
+        # 2. baseline 없으면 탈락
+        if not baseline:
+            continue
 
-        # FALSE ≠ TRUE (≥5% 차이)
+        avg_true     = sum(_body_length(r) for r in true_items)  / len(true_items)
+        avg_false    = sum(_body_length(r) for r in false_items) / len(false_items)
+        avg_baseline = sum(_body_length(r) for r in baseline)    / len(baseline)
+
+        # 3. TRUE가 baseline과 너무 다르면 탈락 (20% 초과)
+        baseline_diff = abs(avg_true - avg_baseline) / max(avg_true, avg_baseline, 1)
+        if baseline_diff > 0.20:
+            continue
+
+        # 4. FALSE가 baseline과 같으면 탈락 (5% 미만 차이 → 주입 효과 없음)
+        false_baseline_diff = abs(avg_false - avg_baseline) / max(avg_false, avg_baseline, 1)
+        if false_baseline_diff < BOOL_GROUP_THRESHOLD:
+            continue
+
+        # 5. TRUE랑 FALSE가 비슷하면 탈락 (5% 미만 차이)
+        max_len = max(avg_true, avg_false, 1)
+        diff    = abs(avg_true - avg_false) / max_len
         if diff < BOOL_GROUP_THRESHOLD:
-            sample_body = (true_items[0].get("response_body") or "").lower()
-            db_note = " + DB 에러 동반" if _has_db_error(sample_body) else ""
-            evidence = (
-                f"Boolean SQLi candidate: true {len(true_items)}개/false {len(false_items)}개, "
-                f"응답 크기 차이 미미 (diff={diff:.1%}){db_note}"
-            )
-            detected.append({"result": true_items[0], "evidence": evidence, "confidence": LOW})
             continue
 
         direction = "true>false" if avg_true > avg_false else "true<false"
-
-        # TRUE ≈ baseline 비교
-        if baseline:
-            avg_baseline = sum(_body_length(r) for r in baseline) / len(baseline)
-            baseline_diff = abs(avg_true - avg_baseline) / max(avg_true, avg_baseline, 1)
-
-            if baseline_diff > 0.20:
-                # TRUE가 baseline과 너무 다름 → suspected
-                evidence = (
-                    f"Boolean-based SQLi (suspected): "
-                    f"true={avg_true:.0f}b, false={avg_false:.0f}b, diff={diff:.1%} ({direction}), "
-                    f"baseline={avg_baseline:.0f}b — true vs baseline 차이 {baseline_diff:.1%} "
-                    f"(REQ-SQLI-008 미충족)"
-                )
-                best = max(true_items, key=_body_length)
-                detected.append({"result": best, "evidence": evidence, "confidence": MEDIUM})
-            else:
-                evidence = (
-                    f"Boolean-based SQLi (confirmed): "
-                    f"true={avg_true:.0f}b ≈ baseline={avg_baseline:.0f}b, "
-                    f"false={avg_false:.0f}b, diff={diff:.1%} ({direction})"
-                )
-                best = max(true_items, key=_body_length)
-                detected.append({"result": best, "evidence": evidence, "confidence": HIGH})
-        else:
-            # baseline 없음 medium만 가능
-            evidence = (
-                f"Boolean-based SQLi (suspected): "
-                f"true={avg_true:.0f}b, false={avg_false:.0f}b, diff={diff:.1%} ({direction}) "
-                f"— baseline 없음"
-            )
-            best = max(true_items, key=_body_length)
-            detected.append({"result": best, "evidence": evidence, "confidence": MEDIUM})
+        evidence = (
+            f"Boolean-based SQLi (confirmed): "
+            f"true={avg_true:.0f}b ≈ baseline={avg_baseline:.0f}b, "
+            f"false={avg_false:.0f}b, diff={diff:.1%} ({direction})"
+        )
+        best = max(true_items, key=_body_length)
+        detected.append({"result": best, "evidence": evidence, "confidence": HIGH})
 
     return detected
 
@@ -461,7 +431,6 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
     for key, group in groups.items():
         baseline = baseline_by_key.get(key, [])
 
-        # 쌍 비교를 위해 최소 2개 필요
         if len(group) < 2:
             sample_body = (group[0].get("response_body") or "").lower()
             error_note = " + DB 에러 동반" if _has_db_error(sample_body) else ""
@@ -490,8 +459,8 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
                 detected.append({"result": group[0], "evidence": evidence, "confidence": LOW})
             continue
 
-        lengths  = [_body_length(r) for r in group]
-        min_len  = min(lengths)
+        lengths   = [_body_length(r) for r in group]
+        min_len   = min(lengths)
         max_len_v = max(lengths)
         if max_len_v == 0:
             continue
@@ -503,7 +472,6 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
             for r in group
         )
 
-        # 쌍 비교에서 차이 or 에러 → confirmed
         if diff >= ORDERBY_DIFF_THRES or has_error:
             extra = " + 'unknown column' 에러" if has_error else ""
             evidence = (
@@ -522,3 +490,4 @@ def detect_orderby_group(results: list[dict]) -> list[dict]:
             detected.append({"result": group[0], "evidence": evidence, "confidence": LOW})
 
     return detected
+

@@ -55,7 +55,7 @@ def _derive_category(vt: str, evidence: str) -> str:
     return "unknown"
 
 
-def _make_finding(r: dict, evidence: str, confidence: str = HIGH) -> dict:
+def _make_finding(r: dict, evidence: str, confidence: str = LOW) -> dict:
     meta     = r.get("meta") or {}
     vt       = (meta.get("vuln_type") or "").lower()
     module, type_ = _derive_module_type(vt)
@@ -126,12 +126,14 @@ def validate(
         found_ids.add(r.get("id"))
 
     # REQ-SQLI-007~010: Boolean / Probe / ORDER BY 그룹
-    for detector in [detect_boolean_group, detect_probe_group, detect_orderby_group]:
+    for detector in [detect_boolean_group]:
         for item in detector(results):
             r        = item["result"]
             evidence = item["evidence"]
             conf     = item.get("confidence", MEDIUM)
             if r.get("id") in found_ids:
+                continue
+            if "diff=0.0%" in (evidence or ""):
                 continue
             findings.append(_make_finding(r, evidence, conf))
             found_ids.add(r.get("id"))

@@ -34,7 +34,7 @@ def _is_destructive_payload(payload: str) -> bool:
 
 
 def _is_time_based_payload(payload: str) -> bool:
-    """REQ-SQLI-015: time-based payload 여부 확인."""
+    """time-based payload 여부 확인."""
     return bool(_SLEEP_RE.search(payload or ""))
 
 
@@ -44,7 +44,7 @@ def _base_url(url: str) -> str:
 
 def _guess_location(method: str, enctype: str = "") -> str:
     """
-    REQ-COMMON-001: 주입 위치 결정.
+    주입 위치 결정.
     - GET -> query
     - POST + application/json -> json
     - POST 기타 -> body (form)
@@ -100,8 +100,8 @@ def _infer_types(
     if field_type in ("text", "input", "email", "search"):
         # numeric 값이라도 text 필드는 string 우선; numeric probe를 추가로 포함
         if is_numeric:
-            return ["sqli_numeric", "sqli_string", "xss_search"]
-        return ["sqli_string", "xss_search"]
+            return ["sqli_numeric", "xss_search"]
+        return ["xss_search"]
 
     if field_type in ("url_param", "hidden"):
         # 숫자 값이고 위치가 query → numeric + string minimal pair

@@ -76,7 +76,7 @@ def _find_payload_in_body(payload: str, body_raw: str) -> int:
 
 
 def _is_encoded(body: str, idx: int, marker_len: int, window: int = 20) -> bool:
-    """REQ-XSS-005/006: 마커 주변에 HTML 인코딩 흔적이 있으면 escape 된 것으로 판단."""
+    """마커 주변에 HTML 인코딩 흔적이 있으면 escape 된 것으로 판단."""
     start = max(0, idx - window)
     end   = idx + marker_len + window
     surrounding = body[start:end]

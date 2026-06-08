@@ -64,7 +64,7 @@ def sqli_finding(
     payload:   str,
     status:    int,
     evidence:  str,
-    confidence: str = HIGH,
+    confidence: str = LOW,
 ) -> dict:
     """SQLi finding 생성 헬퍼"""
     return make_finding(
